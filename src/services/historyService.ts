@@ -28,12 +28,18 @@ class HistoryService {
     return (profile && profile.history) ? profile.history : [];
   }
 
+  /** History entry of an item (the series/movie whose detail was opened) */
+  public getEntry(itemId: string): HistoryItem | undefined {
+    return this.getHistory().find(h => String(h.id) === String(itemId));
+  }
+
   public savePlayback(
     item: VodItem,
     position: number,
     duration: number,
     episode?: VodEpisode,
-    force: boolean = false
+    force: boolean = false,
+    season?: { id?: string; number?: number }
   ): void {
     if (!item || !item.id) return;
     
@@ -53,6 +59,8 @@ class HistoryService {
       series: !!(item.isSeries || (item.episodes && item.episodes.length > 0) || item.kind === 'serie'),
       episodeId: episode && episode.id ? String(episode.id) : undefined,
       episodeNumber: episode ? (episode.number || episode.seriesNumber) : undefined,
+      seasonId: season && season.id ? String(season.id) : undefined,
+      seasonNumber: season && season.number ? season.number : undefined,
       position: validPos,
       duration: validDur,
       updatedAt: now

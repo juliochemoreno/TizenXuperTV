@@ -12,7 +12,9 @@ import { playerService } from './services/playerService';
 import { favoritesService } from './services/favoritesService';
 import { useTvRemote, TvKey } from './hooks/useTvRemote';
 import { useScreenStack } from './hooks/useScreenStack';
-import { VodItem } from './types/vod';
+import { VodItem, VodEpisode } from './types/vod';
+import { historyService } from './services/historyService';
+import { getResumeTarget, startAtForEpisode } from './lib/vodResume';
 import { FocusDomain, VodPlayerState } from './app/types';
 import { useCatalog } from './app/useCatalog';
 import { useLiveTv } from './app/useLiveTv';
@@ -92,8 +94,31 @@ export const App: React.FC = () => {
     setDetailFocus,
     setDetailCounts,
     handleOpenDetail,
-    currentRelatedItems
+    currentRelatedItems,
+    detailEpisodes,
+    setDetailEpisodes
   } = detail;
+
+  // Starts playback from the detail screen: resume / next episode / chosen episode / trailer
+  const playFromDetail = (item: VodItem, episode?: VodEpisode, isTrailer?: boolean) => {
+    if (isTrailer) {
+      setActiveVodPlayer({ item, isTrailer: true });
+      return;
+    }
+    const entry = historyService.getEntry(item.id);
+    const { episodes, seasonId, seasonNumber } = detailEpisodes;
+    const target = episode
+      ? { episode, startAt: startAtForEpisode(episode, entry) }
+      : getResumeTarget(item, episodes, entry, seasonNumber, seasonId);
+    setActiveVodPlayer({
+      item,
+      episode: target.episode,
+      startAt: target.startAt,
+      seriesId: seasonId,
+      seasonNumber,
+      episodes
+    });
+  };
 
   const { stack, push, pop } = useScreenStack();
   const { requestPin, guardLiveCat, guardTab } = useParentalGuards(push, liveCategoriesRef, liveTvFocus);
@@ -186,7 +211,7 @@ export const App: React.FC = () => {
     }
 
     if (activeDetailItem) {
-      return handleVodDetailKeys(key, { ...detail, activeDetailItem, setActiveVodPlayer });
+      return handleVodDetailKeys(key, { ...detail, activeDetailItem, setActiveVodPlayer, playFromDetail });
     }
 
     // Helper to return to the active tab in header
@@ -353,7 +378,8 @@ export const App: React.FC = () => {
           isFavorite={favoritesService.isFavorite(activeDetailItem.id)}
           relatedItems={currentRelatedItems}
           onBack={() => setActiveDetailItem(null)}
-          onPlay={(it, ep, isTrailer) => setActiveVodPlayer({ item: it, episode: ep, isTrailer })}
+          onPlay={(it, ep, isTrailer) => playFromDetail(it, ep, isTrailer)}
+          onEpisodesChange={data => setDetailEpisodes(data)}
           onToggleFavorite={it => favoritesService.toggleFavorite(it.id)}
           onSelectSeason={sIdx => setDetailFocus(prev => ({ ...prev, seasonIndex: sIdx, episodeIndex: 0 }))}
           onSelectRelated={rel => handleOpenDetail(rel)}
@@ -374,9 +400,15 @@ export const App: React.FC = () => {
       {/* Fullscreen Cinema Player (VOD & Trailers) */}
       {activeVodPlayer && (
         <VodPlayerFullscreen
+          key={`${activeVodPlayer.item.id}-${activeVodPlayer.episode?.id || ''}-${activeVodPlayer.isTrailer ? 't' : ''}`}
           item={activeVodPlayer.item}
           episode={activeVodPlayer.episode}
           isTrailer={activeVodPlayer.isTrailer}
+          startAt={activeVodPlayer.startAt}
+          seriesId={activeVodPlayer.seriesId}
+          seasonNumber={activeVodPlayer.seasonNumber}
+          episodes={activeVodPlayer.episodes}
+          onPlayEpisode={ep => setActiveVodPlayer(prev => (prev ? { ...prev, episode: ep, startAt: 0 } : prev))}
           onClose={() => setActiveVodPlayer(null)}
         />
       )}

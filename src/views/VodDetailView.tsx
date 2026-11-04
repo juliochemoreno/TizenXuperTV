@@ -1,8 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { VodItem, VodEpisode, VodSeason } from '../types/vod';
 import { catalogService } from '../services/catalogService';
 import { PosterCard } from '../components/vod/PosterCard';
 import { scrollHorizontalSlider } from '../utils/scrollHelper';
+import { historyService } from '../services/historyService';
+import { getResumeTarget } from '../lib/vodResume';
 
 export type DetailFocusArea = 'back' | 'actions' | 'seasons' | 'episodes' | 'related' | 'audioModal';
 
@@ -15,6 +17,8 @@ export interface VodDetailFocus {
   modalCol?: 'audio' | 'subs';
   modalIndex?: number;
 }
+
+const NO_EPISODES: VodEpisode[] = [];
 
 export const AUDIO_OPTIONS = [
   'Español (Latinoamérica)',
@@ -40,6 +44,7 @@ interface VodDetailViewProps {
   onSelectSeason?: (seasonIndex: number) => void;
   onSelectRelated?: (item: VodItem) => void;
   onDetailLoaded?: (counts: { seasonsCount: number; episodesCount: number; relatedCount: number; isSeries: boolean }) => void;
+  onEpisodesChange?: (data: { episodes: VodEpisode[]; seasonId: string; seasonNumber?: number }) => void;
   onOpenAudioModal?: () => void;
   onCloseAudioModal?: () => void;
   onSelectAudioOption?: (audio: string) => void;
@@ -57,6 +62,7 @@ export const VodDetailView: React.FC<VodDetailViewProps> = ({
   onSelectSeason,
   onSelectRelated,
   onDetailLoaded,
+  onEpisodesChange,
   onOpenAudioModal,
   onCloseAudioModal,
   onSelectAudioOption,
@@ -68,6 +74,13 @@ export const VodDetailView: React.FC<VodDetailViewProps> = ({
     seasons: VodSeason[];
   } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  // Episodes of a season other than the opened one (portal: every season is its own content id)
+  const [seasonEps, setSeasonEps] = useState<{ seasonId: string; episodes: VodEpisode[] } | null>(null);
+  const [seasonLoading, setSeasonLoading] = useState(false);
+  const [historyTick, setHistoryTick] = useState(0);
+
+  useEffect(() => historyService.subscribe(() => setHistoryTick(t => t + 1)), []);
 
   // Audio & Sub preferences from storage
   const currentAudio = localStorage.getItem('xuper_audio_pref') || 'Español (Latinoamérica)';
@@ -82,14 +95,20 @@ export const VodDetailView: React.FC<VodDetailViewProps> = ({
   useEffect(() => {
     let isMounted = true;
     setIsLoading(true);
+    setLoadError(false);
+    setSeasonEps(null);
 
     catalogService.getVodDetail(item).then(data => {
       if (!isMounted) return;
       setDetailData(data);
       setIsLoading(false);
+      // Open on the season of this item
+      const ownIdx = data.seasons.findIndex(s => String(s.id) === String(item.id));
+      if (ownIdx > 0 && onSelectSeason) onSelectSeason(ownIdx);
     }).catch(err => {
       if (!isMounted) return;
       console.warn('[VodDetailView] Detail load failed:', err);
+      setLoadError(true);
       setDetailData({
         item,
         episodes: [],
@@ -105,20 +124,57 @@ export const VodDetailView: React.FC<VodDetailViewProps> = ({
 
   const currentItem = detailData?.item || item;
   const seasons = detailData?.seasons || [];
-  const episodes = detailData?.episodes || [];
+  // Memoized so effects below only run when the list really changes
+  const episodes = useMemo<VodEpisode[]>(
+    () => (seasonEps ? seasonEps.episodes : (detailData?.episodes || NO_EPISODES)),
+    [seasonEps, detailData]
+  );
+  const currentSeasonId = seasonEps ? seasonEps.seasonId : String(item.id);
+  const currentSeasonNumber = (seasons.find(s => String(s.id) === currentSeasonId) || seasons[0])?.number;
+
+  // Load the episodes of the season selected in the season pills
+  useEffect(() => {
+    if (!detailData || seasons.length < 2) return;
+    const target = seasons[focus.seasonIndex];
+    if (!target || String(target.id) === currentSeasonId) return;
+    let alive = true;
+    setSeasonLoading(true);
+    catalogService.getVodDetail({ ...item, id: String(target.id) })
+      .then(d => { if (alive) setSeasonEps({ seasonId: String(target.id), episodes: d.episodes }); })
+      .catch(() => { if (alive) setSeasonEps({ seasonId: String(target.id), episodes: [] }); })
+      .then(() => { if (alive) setSeasonLoading(false); });
+    return () => { alive = false; };
+  }, [focus.seasonIndex, detailData]);
+
+  // Tell the parent which episodes are on screen (used by the remote: OK on an episode, Continuar)
+  useEffect(() => {
+    if (onEpisodesChangeRef.current) {
+      onEpisodesChangeRef.current({ episodes, seasonId: currentSeasonId, seasonNumber: currentSeasonNumber });
+    }
+  }, [episodes, currentSeasonId, currentSeasonNumber]);
+
+  const resume = getResumeTarget(item, episodes, historyService.getEntry(item.id), currentSeasonNumber, currentSeasonId);
+  void historyTick;
   const isSeries = Boolean(currentItem.isSeries || currentItem.kind === 'serie' || seasons.length > 0 || episodes.length > 0);
+
+  // Parent callbacks are new functions on every render: keep the latest in refs so the
+  // effects below only fire when the data changes (otherwise they loop forever)
+  const onDetailLoadedRef = useRef(onDetailLoaded);
+  onDetailLoadedRef.current = onDetailLoaded;
+  const onEpisodesChangeRef = useRef(onEpisodesChange);
+  onEpisodesChangeRef.current = onEpisodesChange;
 
   // Notify parent of counts for remote D-pad navigation
   useEffect(() => {
-    if (onDetailLoaded) {
-      onDetailLoaded({
+    if (onDetailLoadedRef.current) {
+      onDetailLoadedRef.current({
         seasonsCount: seasons.length || (isSeries ? 1 : 0),
         episodesCount: episodes.length,
         relatedCount: relatedItems.length,
         isSeries
       });
     }
-  }, [seasons.length, episodes.length, relatedItems.length, isSeries, onDetailLoaded]);
+  }, [seasons.length, episodes.length, relatedItems.length, isSeries]);
 
   // Auto-scroll horizontal episode slider with comfortable threshold
   useEffect(() => {
@@ -220,10 +276,10 @@ export const VodDetailView: React.FC<VodDetailViewProps> = ({
           {/* Action 0: Play / Resume */}
           <button
             className={`vod-action-btn primary-btn ${focus.area === 'actions' && focus.actionIndex === 0 ? 'is-focused' : ''}`}
-            onClick={() => onPlay(currentItem, episodes[0])}
+            onClick={() => onPlay(currentItem)}
           >
             <span className="btn-icon">▶</span>
-            <span>{isSeries ? 'Reproducir Ep. 1' : 'Reproducir'}</span>
+            <span>{resume.label}</span>
           </button>
 
           {/* Action 1: Favorite */}
@@ -283,8 +339,12 @@ export const VodDetailView: React.FC<VodDetailViewProps> = ({
 
             {/* Horizontal Episodes Slider */}
             <div className="vod-episodes-slider" ref={episodesSliderRef}>
-              {isLoading && episodes.length === 0 ? (
-                <div className="vod-episodes-loading">Cargando episodios de la serie...</div>
+              {(isLoading || seasonLoading) ? (
+                <div className="vod-episodes-loading">Cargando episodios…</div>
+              ) : loadError ? (
+                <div className="vod-episodes-loading">No se pudieron cargar los episodios. Vuelve a abrir la ficha para reintentar.</div>
+              ) : episodes.length === 0 ? (
+                <div className="vod-episodes-loading">No hay episodios disponibles para esta temporada.</div>
               ) : (
                 episodes.map((ep, epIdx) => {
                   const isEpFocused = focus.area === 'episodes' && focus.episodeIndex === epIdx;
@@ -309,7 +369,7 @@ export const VodDetailView: React.FC<VodDetailViewProps> = ({
                       <div className="episode-card-body">
                         <div className="episode-card-title">{ep.title || `Capítulo ${ep.number || epIdx + 1}`}</div>
                         <div className="episode-card-meta">
-                          <span>{ep.duration || '45 min'}</span>
+                          <span>{ep.duration || ''}</span>
                           <span>·</span>
                           <span className="badge-tag-mini">{ep.quality || 'FHD'}</span>
                         </div>

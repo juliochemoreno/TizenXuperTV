@@ -68,6 +68,20 @@ function normalizeItem(raw: any, index: number): VodItem {
   };
 }
 
+/** "01:00:00" / "3600" / "45" -> "60 min" / "45 min" */
+function formatEpisodeDuration(raw: any): string {
+  const v = String(raw || '').trim();
+  if (!v) return '';
+  const parts = v.split(':').map(n => parseInt(n, 10));
+  if (parts.length >= 2 && parts.every(n => !isNaN(n))) {
+    const secs = parts.reduce((acc, n) => acc * 60 + n, 0);
+    return `${Math.max(1, Math.round(secs / 60))} min`;
+  }
+  const n = parseInt(v, 10);
+  if (isNaN(n)) return v;
+  return `${n > 600 ? Math.round(n / 60) : n} min`; // large values are seconds
+}
+
 class CatalogService {
   private cache: {
     featured: VodItem[];
@@ -701,7 +715,7 @@ class CatalogService {
     if (window.MagisClient && typeof window.MagisClient.detail === 'function') {
       try {
         const timeoutPromise = new Promise<any>((_, reject) =>
-          setTimeout(() => reject(new Error('Detail request timeout')), 1200)
+          setTimeout(() => reject(new Error('Detail request timeout')), 15000)
         );
 
         const fetchPromise = new Promise<any>((resolve, reject) => {
@@ -728,7 +742,7 @@ class CatalogService {
             title: ep.title || ep.name || `Capítulo ${idx + 1}`,
             name: ep.title || ep.name || `Capítulo ${idx + 1}`,
             number: ep.number || idx + 1,
-            duration: ep.duration ? `${ep.duration} min` : '45 min',
+            duration: formatEpisodeDuration(ep.duration),
             quality: ep.quality || 'HD',
             streamUrl: ep.streamUrl || '',
             picture: ep.picture || ep.pic || ep.image || ep.cover || item.landscape || item.backdrop || item.poster || '',
@@ -738,22 +752,27 @@ class CatalogService {
           const seasons: VodSeason[] = (res.seasons || []).map((s: any, sIdx: number) => ({
             id: String(s.id || sIdx + 1),
             name: s.name || `Temporada ${s.number || sIdx + 1}`,
-            number: s.number || sIdx + 1,
+            number: Number(s.number) || sIdx + 1,
             episodes: []
-          }));
+          })).sort((a: VodSeason, b: VodSeason) => a.number - b.number);
 
           return {
             item: detailItem,
-            episodes: episodes.length > 0 ? episodes : (item.isSeries ? this.getMockEpisodes(item) : []),
-            seasons: seasons.length > 0 ? seasons : (item.isSeries ? [{ id: '1', name: 'Temporada 1', number: 1, episodes: [] }] : [])
+            // Real portal data only: no invented episodes when the portal returns none
+            episodes,
+            seasons: seasons.length > 0
+              ? seasons
+              : (detailItem.isSeries || episodes.length > 0 ? [{ id: item.id, name: 'Temporada 1', number: 1, episodes: [] }] : [])
           };
         }
       } catch (e) {
-        console.warn('[CatalogService] MagisClient.detail failed, using local/demo detail:', e);
+        // With a portal session, a failure is reported to the UI (retry) instead of showing demo data
+        console.warn('[CatalogService] MagisClient.detail failed:', e);
+        throw e;
       }
     }
 
-    // 2. Fallback for demo/offline items
+    // 2. Demo data only when there is no portal client (offline development)
     const isSeriesItem = Boolean(item.isSeries || item.kind === 'serie' || (item as any).type === 'teleplay');
     return {
       item: { ...item, isSeries: isSeriesItem },

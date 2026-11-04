@@ -6,6 +6,7 @@ export interface HistoryItem {
   episodeId?: string;
   episodeNumber?: number | string;
   seasonNumber?: number;
+  seasonId?: string;
   position: number;   // seconds played
   duration: number;   // total seconds
   updatedAt: number;  // timestamp ms

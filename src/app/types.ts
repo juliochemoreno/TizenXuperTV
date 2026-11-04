@@ -1,5 +1,5 @@
 import { Dispatch, SetStateAction } from 'react';
-import { VodItem } from '../types/vod';
+import { VodItem, VodEpisode } from '../types/vod';
 
 export type Setter<T> = Dispatch<SetStateAction<T>>;
 
@@ -10,8 +10,22 @@ export type DrawerArea = 'cats' | 'channels' | 'search' | 'searchbtn';
 
 export interface VodPlayerState {
   item: VodItem;
-  episode?: any;
+  episode?: VodEpisode;
   isTrailer?: boolean;
+  /** Seconds to resume from */
+  startAt?: number;
+  /** Content id of the season the episode belongs to (portal: each season is its own id) */
+  seriesId?: string;
+  seasonNumber?: number;
+  /** Episodes of that season, used for "next episode" */
+  episodes?: VodEpisode[];
+}
+
+/** Episodes currently shown in the detail screen (the selected season) */
+export interface DetailEpisodes {
+  episodes: VodEpisode[];
+  seasonId?: string;
+  seasonNumber?: number;
 }
 
 export interface LiveLocation {

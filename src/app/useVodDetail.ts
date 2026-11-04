@@ -1,6 +1,7 @@
 import { useState, useCallback, useMemo } from 'react';
 import { VodDetailFocus } from '../views/VodDetailView';
 import { VodItem } from '../types/vod';
+import { DetailEpisodes } from './types';
 
 export interface DetailCounts {
   seasonsCount: number;
@@ -26,7 +27,10 @@ export function useVodDetail(featuredItems: VodItem[], movieItems: VodItem[], se
     isSeries: false
   });
 
+  const [detailEpisodes, setDetailEpisodes] = useState<DetailEpisodes>({ episodes: [] });
+
   const handleOpenDetail = useCallback((item: VodItem) => {
+    setDetailEpisodes({ episodes: [] });
     setActiveDetailItem(item);
     setDetailFocus({
       area: 'actions',
@@ -55,6 +59,8 @@ export function useVodDetail(featuredItems: VodItem[], movieItems: VodItem[], se
     detailCounts,
     setDetailCounts,
     handleOpenDetail,
-    currentRelatedItems
+    currentRelatedItems,
+    detailEpisodes,
+    setDetailEpisodes
   };
 }

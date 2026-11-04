@@ -1,9 +1,9 @@
 import { TvKey } from '../../hooks/useTvRemote';
 import { favoritesService } from '../../services/favoritesService';
 import { VodDetailFocus, AUDIO_OPTIONS, SUB_OPTIONS } from '../../views/VodDetailView';
-import { VodItem } from '../../types/vod';
+import { VodItem, VodEpisode } from '../../types/vod';
 import { DetailCounts } from '../useVodDetail';
-import { Setter, VodPlayerState } from '../types';
+import { Setter, VodPlayerState, DetailEpisodes } from '../types';
 
 export interface VodDetailKeysCtx {
   setActiveVodPlayer: Setter<VodPlayerState | null>;
@@ -14,6 +14,8 @@ export interface VodDetailKeysCtx {
   detailCounts: DetailCounts;
   handleOpenDetail: (item: VodItem) => void;
   currentRelatedItems: VodItem[];
+  detailEpisodes: DetailEpisodes;
+  playFromDetail: (item: VodItem, episode?: VodEpisode, isTrailer?: boolean) => void;
 }
 
 export function handleVodDetailKeys(key: TvKey, ctx: VodDetailKeysCtx): boolean {
@@ -25,7 +27,9 @@ export function handleVodDetailKeys(key: TvKey, ctx: VodDetailKeysCtx): boolean 
     setDetailFocus,
     detailCounts,
     handleOpenDetail,
-    currentRelatedItems
+    currentRelatedItems,
+    detailEpisodes,
+    playFromDetail
   } = ctx;
   const { area, actionIndex, seasonIndex, episodeIndex, relatedIndex } = detailFocus;
   const isSeries = Boolean(activeDetailItem.isSeries || activeDetailItem.kind === 'serie' || detailCounts.isSeries);
@@ -97,7 +101,7 @@ export function handleVodDetailKeys(key: TvKey, ctx: VodDetailKeysCtx): boolean 
     }
     if (key === 'down') {
       if (isSeries && seasonsCount > 1) {
-        setDetailFocus(prev => ({ ...prev, area: 'seasons', seasonIndex: 0 }));
+        setDetailFocus(prev => ({ ...prev, area: 'seasons' }));
       } else if (isSeries && episodesCount > 0) {
         setDetailFocus(prev => ({ ...prev, area: 'episodes', episodeIndex: 0 }));
       } else if (relatedCount > 0) {
@@ -115,13 +119,13 @@ export function handleVodDetailKeys(key: TvKey, ctx: VodDetailKeysCtx): boolean 
     }
     if (key === 'enter') {
       if (actionIndex === 0) {
-        setActiveVodPlayer({ item: activeDetailItem, isTrailer: false });
+        playFromDetail(activeDetailItem);
       } else if (actionIndex === 1) {
         favoritesService.toggleFavorite(activeDetailItem.id);
       } else if (actionIndex === 2) {
         setDetailFocus(prev => ({ ...prev, area: 'audioModal', modalCol: 'audio', modalIndex: 0 }));
       } else if (actionIndex === 3) {
-        setActiveVodPlayer({ item: activeDetailItem, isTrailer: true });
+        playFromDetail(activeDetailItem, undefined, true);
       }
       return true;
     }
@@ -179,15 +183,8 @@ export function handleVodDetailKeys(key: TvKey, ctx: VodDetailKeysCtx): boolean 
       return true;
     }
     if (key === 'enter') {
-      setActiveVodPlayer({
-        item: activeDetailItem,
-        episode: {
-          id: `ep-${episodeIndex + 1}`,
-          number: episodeIndex + 1,
-          title: `Capítulo ${episodeIndex + 1}`
-        },
-        isTrailer: false
-      });
+      const ep = detailEpisodes.episodes[episodeIndex];
+      if (ep) playFromDetail(activeDetailItem, ep);
       return true;
     }
     return true;

@@ -3812,3 +3812,72 @@ html, body {
   width: 0;
   height: 0;
 }
+
+/* VOD player: buffering, error and next-episode card */
+.vod-player-spinner {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 64px;
+  height: 64px;
+  margin: -32px 0 0 -32px;
+  border-radius: 50%;
+  border: 5px solid rgba(255, 255, 255, 0.2);
+  border-top-color: #ffffff;
+  animation: vod-spin 0.9s linear infinite;
+  z-index: 6;
+}
+
+@keyframes vod-spin {
+  to { transform: rotate(360deg); }
+}
+
+.vod-player-error,
+.vod-next-episode {
+  position: absolute;
+  z-index: 7;
+  padding: 24px 32px;
+  border-radius: 20px;
+  background: rgba(17, 22, 34, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+
+.vod-player-error {
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  max-width: 720px;
+}
+
+.vod-player-error-title {
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.vod-player-error-hint,
+.vod-next-hint {
+  margin-top: 10px;
+  font-size: 14px;
+  color: #94a3b8;
+}
+
+.vod-next-episode {
+  right: 48px;
+  bottom: 160px;
+  min-width: 420px;
+}
+
+.vod-next-label {
+  font-size: 14px;
+  font-weight: 800;
+  color: #00e5ff;
+  letter-spacing: 0.5px;
+}
+
+.vod-next-title {
+  margin-top: 6px;
+  font-size: 22px;
+  font-weight: 800;
+}
