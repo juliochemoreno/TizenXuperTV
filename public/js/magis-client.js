@@ -778,7 +778,18 @@
           backupUrls: backupUrls,
           subtitles: subtitleList(episode),
           name: text(play && play.name),
-          isHls: false
+          isHls: false,
+          // All audio/quality variants of this title; resolve again with opts.trackIndex to switch
+          trackIndex: trackIdx,
+          tracks: tracks.map(function (t, i) {
+            return {
+              index: i,
+              audio: trim(t.audioInfo),
+              quality: trim(t.quality),
+              language: trim(t.language || t.languageName || t.audioLanguage || ''),
+              raw: Object.keys(t).join(',')
+            };
+          })
         });
       });
     });

@@ -2,6 +2,16 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { VodItem, VodEpisode } from '../types/vod';
 import { historyService } from '../services/historyService';
 import { playerService } from '../services/playerService';
+import { settingsService } from '../services/settingsService';
+import {
+  SubtitleTrack,
+  SubtitleCue,
+  languageName,
+  sameLanguage,
+  PREF_LANG_CODES,
+  loadSubtitle,
+  cueAt
+} from '../lib/subtitles';
 
 interface VodPlayerFullscreenProps {
   item: VodItem;
@@ -22,6 +32,12 @@ interface VodPlayerFullscreenProps {
 const DEV_FALLBACK_URL = 'https://media.w3.org/2010/05/bunny/movie.mp4';
 const SAVE_EVERY_MS = 15000;
 const NEXT_EPISODE_SECONDS = 10;
+
+interface AudioOption {
+  kind: 'avplay' | 'portal';
+  index: number;
+  label: string;
+}
 
 function formatTime(seconds: number): string {
   if (!seconds || isNaN(seconds) || seconds < 0) return '00:00';
@@ -67,13 +83,26 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
   const timeRef = useRef({ t: 0, d: 0 });
   const startedAtRef = useRef<number>(startAt);
 
-  // Audio & Sub preferences from storage
-  const audioTrack = localStorage.getItem('xuper_audio_pref') || 'Español Latino';
-  const subTrack = localStorage.getItem('xuper_sub_pref') || 'Desactivados';
-
   const [streamInfoText, setStreamInfoText] = useState<string>('');
   const [browserUrl, setBrowserUrl] = useState<string | null>(null);
   const [avMode, setAvMode] = useState(false);
+
+  // Audio / subtitles chosen from the player menus (bottom-right buttons)
+  const [quality, setQuality] = useState<string>('');
+  const [subtitles, setSubtitles] = useState<SubtitleTrack[]>([]);
+  const [subIndex, setSubIndex] = useState<number>(-1);
+  const [cues, setCues] = useState<SubtitleCue[]>([]);
+  const [audioOptions, setAudioOptions] = useState<AudioOption[]>([]);
+  const [audioIndex, setAudioIndex] = useState<number>(0);
+  const [focusArea, setFocusArea] = useState<'none' | 'controls'>('none');
+  const [ctrlIndex, setCtrlIndex] = useState<number>(0); // 0 = subtitles, 1 = audio
+  const [menu, setMenu] = useState<null | 'subs' | 'audio'>(null);
+  const [menuCursor, setMenuCursor] = useState<number>(0);
+  const [toastId, setToastId] = useState<number>(0);
+  const portalTrackRef = useRef<number>(0);
+  const subsInitRef = useRef<boolean>(false);
+  const toastTimerRef = useRef<any>(null);
+  const settings = settingsService.get();
 
   const epIndex = episode ? episodes.findIndex(ep => String(ep.id) === String(episode.id)) : -1;
   const nextEpisode = epIndex !== -1 && epIndex + 1 < episodes.length ? episodes[epIndex + 1] : undefined;
@@ -83,6 +112,14 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
   const subtitle = !isTrailer && episode
     ? `${seasonNumber ? `T${seasonNumber}:` : ''}E${epNumber} · ${episode.title || episode.name || 'Capítulo'}`
     : (!isTrailer ? [item.year, item.duration].filter(v => v && v !== '—').join(' · ') : 'Avance cinematográfico');
+
+  // Short center feedback (pause / seek): disappears on its own
+  const flash = useCallback((msg: string) => {
+    setOsdMessage(msg);
+    setToastId(n => n + 1);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setOsdMessage(null), 1200);
+  }, []);
 
   // Trigger OSD visibility timeout (4.5 seconds)
   const triggerOsd = useCallback(() => {
@@ -190,6 +227,22 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
         timeRef.current.d = d;
         setDuration(d);
         if (startedAtRef.current > 5) window.XuperAVPlay.seekTo(startedAtRef.current);
+        // Several audio languages inside the same stream: switch them without reloading
+        try {
+          const info = window.webapis.avplay.getTotalTrackInfo() || [];
+          const audios: AudioOption[] = [];
+          for (let i = 0; i < info.length; i++) {
+            if (info[i].type !== 'AUDIO') continue;
+            let lang = '';
+            try { lang = JSON.parse(info[i].extra_info || '{}').language || ''; } catch (e) {}
+            audios.push({ kind: 'avplay', index: info[i].index, label: languageName(lang) });
+          }
+          console.log('[VodPlayer] AVPlay audio tracks', audios.length);
+          if (audios.length > 1) {
+            setAudioOptions(audios);
+            setAudioIndex(0);
+          }
+        } catch (e) {}
       };
       video.ontimeupdate = () => {
         if (!isCurrent()) return;
@@ -236,13 +289,28 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
       return;
     }
 
-    window.MagisClient.resolve(contentId, seasonId, {}, (err: any, res: any) => {
+    window.MagisClient.resolve(contentId, seasonId, { trackIndex: portalTrackRef.current }, (err: any, res: any) => {
       if (!isCurrent()) return; // the user already left or chose another episode
       if (err || !res || !res.url) {
         failed((err && err.message) || 'No se pudo obtener el video del portal.');
         return;
       }
       setStreamInfoText([res.quality, res.codec, res.audio && `Audio: ${res.audio}`].filter(Boolean).join(' · '));
+      setQuality(res.quality || '');
+      const tracks: any[] = Array.isArray(res.tracks) ? res.tracks : [];
+      setAudioOptions(tracks.length > 0
+        ? tracks.map(t => ({ kind: 'portal' as const, index: t.index, label: languageName(t.audio) + (tracks.length > 1 && t.quality ? ` · ${t.quality}` : '') }))
+        : [{ kind: 'portal', index: 0, label: languageName(res.audio) }]);
+      setAudioIndex(Math.max(0, tracks.findIndex(t => t.index === res.trackIndex)));
+      const subs: SubtitleTrack[] = Array.isArray(res.subtitles) ? res.subtitles : [];
+      setSubtitles(subs);
+      if (!subsInitRef.current) {
+        // First load: subtitles follow the profile preference (Configuración global)
+        subsInitRef.current = true;
+        const pref = PREF_LANG_CODES[settings.subLang] || 'es';
+        const audioInPref = sameLanguage(res.audio, pref);
+        setSubIndex(settings.subtitle && !audioInPref ? subs.findIndex(sb => sameLanguage(sb.lang, pref)) : -1);
+      }
       if (hasAvPlay()) {
         playOnTv(res);
       } else if (res.mime === 'video/mp2t' || /\.ts(\?|$)/i.test(res.url)) {
@@ -290,7 +358,7 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
     };
     const onPlaying = () => setIsBuffering(false);
     const onWaiting = () => setIsBuffering(true);
-    const onEnded = () => handleEnded();
+    const onEnded = () => handleEndedRef.current();
     const onError = () => {
       if (import.meta.env.DEV && video.src.indexOf(DEV_FALLBACK_URL) === -1) {
         video.src = DEV_FALLBACK_URL;
@@ -324,7 +392,19 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
         video.removeAttribute('src');
       } catch {}
     };
-  }, [browserUrl, handleEnded]);
+  }, [browserUrl]);
+
+  // Load the selected subtitle file
+  useEffect(() => {
+    setCues([]);
+    const track = subtitles[subIndex];
+    if (!track) return;
+    let alive = true;
+    loadSubtitle(track.url)
+      .then(list => { if (alive) setCues(list); })
+      .catch(() => { if (alive) flash('No se pudieron cargar los subtítulos'); });
+    return () => { alive = false; };
+  }, [subIndex, subtitles]);
 
   // Leaving the player: save the position and release the TV player
   useEffect(() => {
@@ -359,11 +439,11 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
       if (window.XuperAVPlay.isPaused) {
         window.XuperAVPlay.play();
         setIsPlaying(true);
-        setOsdMessage('▶ Reanudado');
+        flash('▶ Reanudado');
       } else {
         window.XuperAVPlay.pause();
         setIsPlaying(false);
-        setOsdMessage('⏸ Pausa');
+        flash('⏸ Pausa');
         saveProgress();
       }
       return;
@@ -371,10 +451,10 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
     if (!video) return;
     if (video.paused) {
       video.play().catch(() => {});
-      setOsdMessage('▶ Reanudado');
+      flash('▶ Reanudado');
     } else {
       video.pause();
-      setOsdMessage('⏸ Pausa');
+      flash('⏸ Pausa');
       saveProgress();
     }
   };
@@ -389,8 +469,35 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
     }
     timeRef.current.t = target;
     setCurrentTime(target);
-    setOsdMessage(delta < 0 ? `⏪ ${delta}s` : `⏩ +${delta}s`);
+    flash(delta < 0 ? `⏪ ${delta}s` : `⏩ +${delta}s`);
   };
+
+  const chooseAudio = (idx: number) => {
+    const opt = audioOptions[idx];
+    if (!opt || idx === audioIndex) return;
+    setAudioIndex(idx);
+    if (opt.kind === 'avplay') {
+      try { window.webapis.avplay.setSelectTrack('AUDIO', opt.index); } catch (e) {}
+    } else {
+      // Another audio language is another file on the portal: reload it at the same position
+      portalTrackRef.current = opt.index;
+      setRetryTick(t => t + 1);
+    }
+    flash(`Audio: ${opt.label}`);
+  };
+
+  const chooseSubtitle = (idx: number) => {
+    setSubIndex(idx);
+    const track = subtitles[idx];
+    const prefIdx = track ? PREF_LANG_CODES.findIndex(code => sameLanguage(track.lang, code)) : -1;
+    settingsService.set(prefIdx !== -1 ? { subtitle: true, subLang: prefIdx } : { subtitle: !!track });
+    flash(track ? `Subtítulos: ${languageName(track.lang)}` : 'Subtítulos desactivados');
+  };
+
+  // Menu rows: subtitles start with "Desactivados" (-1)
+  const subRows = [{ label: 'Desactivados', value: -1 }, ...subtitles.map((sb, i) => ({ label: languageName(sb.lang), value: i }))];
+  const audioRows = audioOptions.map((a, i) => ({ label: a.label, value: i }));
+  const menuRows = menu === 'subs' ? subRows : audioRows;
 
   // Handle TV Remote Keys during full playback
   useEffect(() => {
@@ -399,11 +506,16 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
       const key = e.key;
       const isBack = code === 10009 || code === 27 || code === 461 || key === 'Escape' || key === 'Backspace';
       const isEnter = code === 13 || code === 32 || code === 19 || code === 415 || code === 10252;
+      const isLeft = code === 37 || key === 'ArrowLeft';
+      const isRight = code === 39 || key === 'ArrowRight';
+      const isUp = code === 38 || key === 'ArrowUp';
+      const isDown = code === 40 || key === 'ArrowDown';
+      if (!(isBack || isEnter || isLeft || isRight || isUp || isDown)) return;
+      e.preventDefault();
+      e.stopPropagation();
 
       // "Next episode" card
       if (nextCountdown !== null) {
-        e.preventDefault();
-        e.stopPropagation();
         if (isEnter && nextEpisode && onPlayEpisode) {
           setNextCountdown(null);
           onPlayEpisode(nextEpisode);
@@ -414,45 +526,65 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
         return;
       }
 
+      triggerOsd();
+
+      // Audio / subtitles menu
+      if (menu) {
+        if (isBack || isLeft) setMenu(null);
+        else if (isUp) setMenuCursor(c => Math.max(0, c - 1));
+        else if (isDown) setMenuCursor(c => Math.min(menuRows.length - 1, c + 1));
+        else if (isEnter) {
+          const row = menuRows[menuCursor];
+          if (row) {
+            if (menu === 'subs') chooseSubtitle(row.value);
+            else chooseAudio(row.value);
+          }
+          setMenu(null);
+        }
+        return;
+      }
+
+      // Bottom-right buttons (Subtítulos / Audio)
+      if (focusArea === 'controls') {
+        if (isBack || isUp) setFocusArea('none');
+        else if (isLeft) setCtrlIndex(0);
+        else if (isRight) setCtrlIndex(1);
+        else if (isEnter) {
+          const which = ctrlIndex === 0 ? 'subs' : 'audio';
+          const rows = which === 'subs' ? subRows : audioRows;
+          const current = which === 'subs' ? subIndex : audioIndex;
+          setMenu(which);
+          setMenuCursor(Math.max(0, rows.findIndex(r => r.value === current)));
+        }
+        return;
+      }
+
       if (isBack) {
-        e.preventDefault();
-        e.stopPropagation();
         onClose();
         return;
       }
 
       if (error) {
-        if (isEnter) {
-          e.preventDefault();
-          setRetryTick(t => t + 1);
-        }
+        if (isEnter) setRetryTick(t => t + 1);
         return;
       }
 
       if (isEnter) {
-        e.preventDefault();
         togglePause();
-        triggerOsd();
         return;
       }
-
       // Hold ◄ / ► to jump faster (30 s steps while the key repeats)
-      if (code === 37 || key === 'ArrowLeft') {
-        e.preventDefault();
+      if (isLeft) {
         seekBy(e.repeat ? -30 : -10);
-        triggerOsd();
         return;
       }
-      if (code === 39 || key === 'ArrowRight') {
-        e.preventDefault();
+      if (isRight) {
         seekBy(e.repeat ? 30 : 10);
-        triggerOsd();
         return;
       }
-
-      if (code === 38 || code === 40 || key === 'ArrowUp' || key === 'ArrowDown') {
-        e.preventDefault();
-        triggerOsd();
+      if (isDown) {
+        setFocusArea('controls');
+        setCtrlIndex(0);
       }
     };
 
@@ -460,9 +592,15 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
     return () => {
       window.removeEventListener('keydown', onKeyDown, { capture: true });
     };
-  }, [onClose, triggerOsd, nextCountdown, nextEpisode, onPlayEpisode, error]);
+  });
 
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
+  const remainingTime = duration > 0 ? Math.max(0, duration - currentTime) : 0;
+  const osdVisible = showOsd || !isPlaying || !!error || !!menu || focusArea === 'controls';
+  const subtitleText = subIndex >= 0 ? cueAt(cues, currentTime) : '';
+  const subSize = settings.size === 1 ? 'is-large' : settings.size === 2 ? 'is-small' : '';
+  const subStyle = settings.style === 1 ? 'is-yellow' : settings.style === 2 ? 'is-boxed' : '';
+  const year = item.year && item.year !== '—' ? item.year : '';
 
   return (
     <div className={`vod-fullscreen-player ${avMode ? 'is-avplay' : ''}`}>
@@ -475,9 +613,15 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
 
       {isBuffering && !error && <div className="vod-player-spinner" />}
 
-      {/* Center Feedback Indicator on Seek / Pause */}
+      {subtitleText && (
+        <div className={`vp-subtitle ${osdVisible ? 'is-raised' : ''} ${subSize} ${subStyle}`}>
+          {subtitleText.split('\n').map((line, i) => <div key={i}>{line}</div>)}
+        </div>
+      )}
+
+      {/* Center feedback on seek / pause (disappears on its own) */}
       {osdMessage && (
-        <div className="player-center-toast" key={osdMessage + currentTime}>
+        <div className="player-center-toast" key={toastId}>
           {osdMessage}
         </div>
       )}
@@ -499,53 +643,71 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
         </div>
       )}
 
-      {/* Apple TV-style Cinema OSD Overlay */}
-      <div className={`vod-player-osd ${showOsd || !isPlaying || error ? 'is-visible' : 'is-hidden'}`}>
-        {/* Top Header Bar */}
-        <div className="vod-osd-top">
-          <div className="vod-osd-info">
-            <span className="vod-osd-badge">{isTrailer ? 'TRÁILER OFICIAL' : 'REPRODUCIENDO'}</span>
-            {streamInfoText && !isTrailer && (
-              <span className="vod-osd-badge" style={{ marginLeft: 8, background: 'rgba(0, 229, 255, 0.2)', color: '#00e5ff', borderColor: 'rgba(0, 229, 255, 0.4)' }}>
-                {streamInfoText}
-              </span>
-            )}
-            <h1 className="vod-osd-title">{title}</h1>
-            <p className="vod-osd-subtitle">{subtitle}</p>
+      {/* Apple TV style overlay */}
+      <div className={`vp-osd ${osdVisible ? 'is-visible' : ''}`}>
+        {quality && !isTrailer && <div className="vp-badge">{quality}</div>}
+
+        <div className="vp-center">
+          <div className="vp-round">
+            <span className="vp-skip">↺</span>
+            <span className="vp-skip-num">10</span>
           </div>
-          <button className="vod-osd-close-btn" onClick={onClose}>
-            <span>✕ Salir</span>
-          </button>
+          <div className={`vp-round vp-play ${focusArea === 'none' && !menu ? 'is-focused' : ''}`}>
+            {isPlaying ? '❚❚' : '▶'}
+          </div>
+          <div className="vp-round">
+            <span className="vp-skip">↻</span>
+            <span className="vp-skip-num">10</span>
+          </div>
         </div>
 
-        {/* Bottom Playback Bar */}
-        <div className="vod-osd-bottom">
-          <div className="vod-osd-time-row">
-            <span className="vod-time-elapsed">{formatTime(currentTime)}</span>
-            <div className="vod-seekbar-track">
-              <div
-                className="vod-seekbar-fill"
-                style={{ width: `${progressPercent}%` }}
-              />
-              <div
-                className="vod-seekbar-thumb"
-                style={{ left: `${progressPercent}%` }}
-              />
+        <div className="vp-bottom">
+          <div className="vp-info-row">
+            <div className="vp-titles">
+              {year && <div className="vp-year">{year}</div>}
+              <div className="vp-title">{isTrailer ? `${item.title} — Tráiler` : item.title}</div>
+              {!isTrailer && episode && <div className="vp-episode">{subtitle}</div>}
             </div>
-            <span className="vod-time-duration">{formatTime(duration)}</span>
+            {!isTrailer && (
+              <div className="vp-ctrls">
+                <div className={`vp-ctrl ${focusArea === 'controls' && ctrlIndex === 0 ? 'is-focused' : ''} ${subIndex >= 0 ? 'is-on' : ''}`} title="Subtítulos">
+                  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="3" y="5" width="18" height="14" rx="3" />
+                    <path d="M7 13h4M13 13h4M7 16h7" />
+                  </svg>
+                </div>
+                <div className={`vp-ctrl ${focusArea === 'controls' && ctrlIndex === 1 ? 'is-focused' : ''}`} title="Audio">
+                  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2" />
+                  </svg>
+                </div>
+
+                {menu && (
+                  <div className={`vp-menu ${menu === 'audio' ? 'is-audio' : ''}`}>
+                    <div className="vp-menu-title">{menu === 'subs' ? 'Subtítulos' : 'Audio'}</div>
+                    {menuRows.length === 0 && <div className="vp-menu-empty">No hay opciones</div>}
+                    {menuRows.map((row, i) => {
+                      const selected = menu === 'subs' ? row.value === subIndex : row.value === audioIndex;
+                      return (
+                        <div key={row.label + i} className={`vp-menu-row ${i === menuCursor ? 'is-focused' : ''}`}>
+                          <span className="vp-check">{selected ? '✓' : ''}</span>
+                          <span>{row.label}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
-          <div className="vod-osd-meta-controls">
-            <div className="vod-osd-pill">
-              <span className="pill-dot">●</span>
-              <span>Audio: {audioTrack}</span>
+          <div className="vp-progress-row">
+            <span className="vp-time">{formatTime(currentTime)}</span>
+            <div className="vp-track">
+              <div className="vp-fill" style={{ width: `${progressPercent}%` }} />
+              <div className="vp-thumb" style={{ left: `${progressPercent}%` }} />
             </div>
-            <div className="vod-osd-pill">
-              <span>Subs: {subTrack}</span>
-            </div>
-            <div className="vod-osd-hint">
-              <span>◀ / ▶ 10s (mantener: 30s) · [OK] Pausa · [VOLVER] Salir</span>
-            </div>
+            <span className="vp-time">−{formatTime(remainingTime)}</span>
           </div>
         </div>
       </div>
