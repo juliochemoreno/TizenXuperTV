@@ -1,0 +1,180 @@
+import React, { useRef, useEffect } from 'react';
+import { VodItem } from '../types/vod';
+import { HistoryItem } from '../types/history';
+import { HeroShowcase } from '../components/vod/HeroShowcase';
+import { ContentSlider } from '../components/vod/ContentSlider';
+import { ContinueWatchingRow } from '../components/vod/ContinueWatchingRow';
+
+export interface DestacadosFocus {
+  area: 'hero' | 'row';
+  heroBtn?: 'play' | 'fav';
+  rowIndex: number;
+  cardIndex: number;
+}
+
+export interface ContentRowDef {
+  id: string;
+  title: string;
+  subtitle?: string;
+  type: 'vod' | 'history';
+  isRanked?: boolean;
+  isWide?: boolean;
+  items: VodItem[] | HistoryItem[];
+}
+
+interface DestacadosViewProps {
+  heroItems: VodItem[];
+  activeHeroIndex: number;
+  historyItems: HistoryItem[];
+  trendingItems: VodItem[];
+  recommendedMovies: VodItem[];
+  mustWatchSeries: VodItem[];
+  rows?: ContentRowDef[];
+  focus: DestacadosFocus;
+  isFocusActive?: boolean;
+  isFavorite: boolean;
+  onPlayHero: (item: VodItem) => void;
+  onToggleFavHero: (item: VodItem) => void;
+  onActivateHistory: (item: HistoryItem) => void;
+  onActivateVod: (item: VodItem) => void;
+}
+
+export const DestacadosView: React.FC<DestacadosViewProps> = ({
+  heroItems,
+  activeHeroIndex,
+  historyItems,
+  trendingItems,
+  recommendedMovies,
+  mustWatchSeries,
+  rows,
+  focus,
+  isFocusActive = true,
+  isFavorite,
+  onPlayHero,
+  onToggleFavHero,
+  onActivateHistory,
+  onActivateVod
+}) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const currentHero = heroItems[activeHeroIndex] || heroItems[0];
+
+  // Auto-scroll logic: when vertical row focus changes, smoothly frame the section
+  useEffect(() => {
+    if (!isFocusActive || !containerRef.current) return;
+
+    if (focus.area === 'hero') {
+      if (typeof containerRef.current.scrollTo === 'function') {
+        containerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+      } else {
+        containerRef.current.scrollTop = 0;
+      }
+    } else if (focus.area === 'row') {
+      const sections = containerRef.current.querySelectorAll('.content-section');
+      if (sections[focus.rowIndex]) {
+        const secEl = sections[focus.rowIndex] as HTMLElement;
+        const targetTop = Math.max(0, secEl.offsetTop - 24);
+        if (typeof containerRef.current.scrollTo === 'function') {
+          containerRef.current.scrollTo({ top: targetTop, behavior: 'smooth' });
+        } else {
+          containerRef.current.scrollTop = targetTop;
+        }
+      }
+    }
+  }, [isFocusActive, focus.area, focus.rowIndex]);
+
+  // Compute visible rows if not explicitly provided
+  const visibleRows: ContentRowDef[] = rows || (() => {
+    const list: ContentRowDef[] = [];
+    if (historyItems && historyItems.length > 0) {
+      list.push({ id: 'history', title: 'Seguir viendo', type: 'history', items: historyItems });
+    }
+    if (mustWatchSeries && mustWatchSeries.length > 0) {
+      list.push({
+        id: 'top_series',
+        title: 'Top 10: series en Xuper TV',
+        type: 'vod',
+        isRanked: true,
+        items: mustWatchSeries.slice(0, 10)
+      });
+    }
+    if (recommendedMovies && recommendedMovies.length > 0) {
+      list.push({
+        id: 'top_movies',
+        title: 'Top 10: películas en Xuper TV',
+        type: 'vod',
+        isRanked: true,
+        items: recommendedMovies.slice(0, 10)
+      });
+    }
+    if (mustWatchSeries && mustWatchSeries.length > 3) {
+      list.push({
+        id: 'featured_collection',
+        title: 'Contra todo pronóstico',
+        type: 'vod',
+        isWide: true,
+        items: mustWatchSeries.slice(1, 13)
+      });
+    }
+    if (recommendedMovies && recommendedMovies.length > 5) {
+      list.push({
+        id: 'must_watch',
+        title: 'Éxitos imperdibles en Xuper TV',
+        type: 'vod',
+        items: recommendedMovies.slice(10, 26)
+      });
+    }
+    if (trendingItems && trendingItems.length > 0) {
+      list.push({
+        id: 'new_releases',
+        title: 'Últimos estrenos en Xuper TV',
+        type: 'vod',
+        items: trendingItems.slice(0, 16)
+      });
+    }
+    return list;
+  })();
+
+  return (
+    <div className="page-container" ref={containerRef}>
+      <HeroShowcase
+        item={currentHero}
+        totalItems={heroItems.length}
+        activeIndex={activeHeroIndex}
+        focusedButton={isFocusActive && focus.area === 'hero' ? (focus.heroBtn || 'play') : null}
+        isFavorite={isFavorite}
+        isDimmed={isFocusActive && focus.area === 'row'}
+        onPlay={onPlayHero}
+        onToggleFav={onToggleFavHero}
+      />
+
+      {visibleRows.map((row, rowIdx) => {
+        const isFocusedRow = isFocusActive && focus.area === 'row' && focus.rowIndex === rowIdx;
+        const focusedIndex = isFocusedRow ? focus.cardIndex : null;
+
+        if (row.type === 'history') {
+          return (
+            <ContinueWatchingRow
+              key={row.id}
+              items={row.items as HistoryItem[]}
+              focusedIndex={focusedIndex}
+              onActivate={onActivateHistory}
+            />
+          );
+        }
+
+        return (
+          <ContentSlider
+            key={row.id}
+            title={row.title}
+            subtitle={row.subtitle}
+            items={row.items as VodItem[]}
+            isRanked={row.isRanked}
+            isWide={row.isWide}
+            focusedIndex={focusedIndex}
+            onActivate={onActivateVod}
+          />
+        );
+      })}
+    </div>
+  );
+};

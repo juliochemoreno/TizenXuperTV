@@ -1,0 +1,60 @@
+import { useState, useCallback, useMemo } from 'react';
+import { VodDetailFocus } from '../views/VodDetailView';
+import { VodItem } from '../types/vod';
+
+export interface DetailCounts {
+  seasonsCount: number;
+  episodesCount: number;
+  relatedCount: number;
+  isSeries: boolean;
+}
+
+/** VOD detail screen state and the related items shown on it */
+export function useVodDetail(featuredItems: VodItem[], movieItems: VodItem[], seriesItems: VodItem[]) {
+  const [activeDetailItem, setActiveDetailItem] = useState<VodItem | null>(null);
+  const [detailFocus, setDetailFocus] = useState<VodDetailFocus>({
+    area: 'actions',
+    actionIndex: 0,
+    seasonIndex: 0,
+    episodeIndex: 0,
+    relatedIndex: 0
+  });
+  const [detailCounts, setDetailCounts] = useState<DetailCounts>({
+    seasonsCount: 1,
+    episodesCount: 0,
+    relatedCount: 0,
+    isSeries: false
+  });
+
+  const handleOpenDetail = useCallback((item: VodItem) => {
+    setActiveDetailItem(item);
+    setDetailFocus({
+      area: 'actions',
+      actionIndex: 0,
+      seasonIndex: 0,
+      episodeIndex: 0,
+      relatedIndex: 0
+    });
+  }, []);
+
+  // Compute related items for active detail screen
+  const currentRelatedItems = useMemo<VodItem[]>(() => {
+    if (!activeDetailItem) return [];
+    const isSer = Boolean(activeDetailItem.isSeries || activeDetailItem.kind === 'serie');
+    const pool = isSer
+      ? (seriesItems.length > 0 ? seriesItems : featuredItems)
+      : (movieItems.length > 0 ? movieItems : featuredItems);
+    return pool.filter(it => it.id !== activeDetailItem.id).slice(0, 10);
+  }, [activeDetailItem, seriesItems, movieItems, featuredItems]);
+
+  return {
+    activeDetailItem,
+    setActiveDetailItem,
+    detailFocus,
+    setDetailFocus,
+    detailCounts,
+    setDetailCounts,
+    handleOpenDetail,
+    currentRelatedItems
+  };
+}

@@ -1,0 +1,21 @@
+# Dependencies and build output
+node_modules/
+dist/
+build/
+*.wgt
+
+# Signing material (certificates live outside the repo)
+*.p12
+*.pem
+author-signature.xml
+signature1.xml
+
+# OS / editor
+.DS_Store
+*.log
+.vscode/
+.idea/
+
+# Local env
+.env
+.env.*

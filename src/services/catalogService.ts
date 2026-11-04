@@ -1,0 +1,803 @@
+import { VodItem, VodEpisode, VodSeason } from '../types/vod';
+
+declare global {
+  interface Window {
+    MagisClient?: any;
+    __xuperCatalogCache?: any;
+    XUPERTV_PORTAL?: {
+      generatedAt?: string;
+      source?: string;
+      roots?: Record<string, any>;
+      items: any[];
+    };
+    XUPERTV_CATALOG?: {
+      source?: string;
+      items: any[];
+    };
+  }
+}
+
+function normalizeItem(raw: any, index: number): VodItem {
+  if (!raw) return { id: `item-${index}`, title: 'Sin título' };
+  
+  const id = String(raw.id || raw.vodId || raw.programId || raw.program_id || `item-${index}`);
+  const title = String(raw.title || raw.name || raw.programName || raw.programTitle || 'Sin título');
+  const score = raw.score || raw.vote_average || raw.rating || raw.movieRate || raw.programScore || '8.5';
+  const year = String(raw.year || raw.release_year || raw.programYear || (raw.releaseDate || '').slice(0, 4) || '2024');
+  const duration = raw.duration || raw.runtime || raw.runtimeMinutes || 'Película';
+  
+  let genres: string[] = ['Película'];
+  if (Array.isArray(raw.genres)) genres = raw.genres;
+  else if (typeof raw.genres === 'string') genres = raw.genres.split(',');
+  else if (typeof raw.genre === 'string') genres = raw.genre.split(',');
+
+  const synopsis = raw.synopsis || raw.overview || raw.description || raw.programUpdateContent || 'Sin sinopsis disponible.';
+  const poster = raw.posterUrl || raw.poster_url || raw.poster || raw.image || raw.imageUrl || raw.cover || 'assets/placeholder_vertical.png';
+  const landscape = raw.landscapeUrl || raw.landscape_url || raw.landscape || raw.wideImage || raw.bannerImage || poster;
+  const backdrop = raw.backdropUrl || raw.backdrop_url || raw.backdrop || landscape;
+
+  const rowName = String(raw.row || '');
+  const isSeries = !!(
+    raw.type === 'teleplay' || raw.type === 'series' || raw.kind === 'serie' ||
+    (raw.category && raw.category.indexOf('serie') !== -1) ||
+    (raw.episodes && raw.episodes.length > 0) ||
+    (raw.seasons && raw.seasons.length > 0) ||
+    rowName.includes('Series') || rowName.includes('Dramas') || rowName.includes('Telenovelas')
+  );
+
+  return {
+    id,
+    title,
+    category: raw.category || '',
+    kind: isSeries ? 'serie' : (raw.kind || 'pelicula'),
+    score: String(score),
+    year: String(year),
+    duration: typeof duration === 'number' ? `${Math.floor(duration/60)} h ${duration%60} min` : String(duration),
+    genres,
+    director: raw.director || '—',
+    actors: raw.actors || raw.actorDisplay || raw.cast || '—',
+    synopsis,
+    poster,
+    landscape,
+    backdrop,
+    isSeries,
+    row: rowName,
+    streamUrl: raw.streamUrl || raw.stream_url || '',
+    seasons: raw.seasons || [],
+    episodes: raw.episodes || []
+  };
+}
+
+class CatalogService {
+  private cache: {
+    featured: VodItem[];
+    movies: VodItem[];
+    series: VodItem[];
+    kids: VodItem[];
+    anime: VodItem[];
+    rowsByGroup: Record<string, VodItem[]>;
+  } | null = null;
+
+  public async fetchCatalog(): Promise<{
+    featured: VodItem[];
+    movies: VodItem[];
+    series: VodItem[];
+    kids: VodItem[];
+    anime: VodItem[];
+    rowsByGroup: Record<string, VodItem[]>;
+  }> {
+    if (this.cache) return this.cache;
+
+    // 1. Check window.XUPERTV_PORTAL (rich bundled portal catalog with 610 items)
+    if (typeof window !== 'undefined' && window.XUPERTV_PORTAL && Array.isArray(window.XUPERTV_PORTAL.items) && window.XUPERTV_PORTAL.items.length > 0) {
+      const all = window.XUPERTV_PORTAL.items.map((it: any, idx: number) => normalizeItem(it, idx));
+      return this.categorize(all);
+    }
+
+    // 2. Check window.XUPERTV_CATALOG
+    if (typeof window !== 'undefined' && window.XUPERTV_CATALOG && Array.isArray(window.XUPERTV_CATALOG.items) && window.XUPERTV_CATALOG.items.length > 0) {
+      const all = window.XUPERTV_CATALOG.items.map((it: any, idx: number) => normalizeItem(it, idx));
+      return this.categorize(all);
+    }
+
+    // 3. Check localStorage cache
+    try {
+      const cached = localStorage.getItem('xuper_portal_cache_v2');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed && Array.isArray(parsed.items) && parsed.items.length > 0) {
+          const all = parsed.items.map((it: any, idx: number) => normalizeItem(it, idx));
+          return this.categorize(all);
+        }
+      }
+    } catch (e) {}
+
+    // 4. Fallback demo data
+    return this.getDemoCatalog();
+  }
+
+  private categorize(items: VodItem[]) {
+    const featured: VodItem[] = [];
+    const movies: VodItem[] = [];
+    const series: VodItem[] = [];
+    const kids: VodItem[] = [];
+    const anime: VodItem[] = [];
+    const rowsByGroup: Record<string, VodItem[]> = {};
+
+    for (const item of items) {
+      if (item.row) {
+        if (!rowsByGroup[item.row]) rowsByGroup[item.row] = [];
+        rowsByGroup[item.row].push(item);
+      }
+
+      const cat = (item.category || '').toLowerCase();
+      const kind = (item.kind || '').toLowerCase();
+      const row = (item.row || '').toLowerCase();
+
+      const isFeatured = (
+        cat.includes('destacado') ||
+        kind.includes('destacado') ||
+        row.includes('top15') ||
+        row.includes('2026') ||
+        row.includes('premio') ||
+        row.includes('halloween')
+      );
+      if (isFeatured) {
+        featured.push(item);
+      }
+
+      if (item.isSeries || cat.includes('serie') || kind.includes('serie') || row.includes('series')) {
+        series.push(item);
+      } else {
+        movies.push(item);
+      }
+
+      if (cat.includes('infantil') || cat.includes('kids') || row.includes('kids') || row.includes('niños')) {
+        kids.push(item);
+      }
+      if (cat.includes('anime') || cat.includes('animacion') || row.includes('anime')) {
+        anime.push(item);
+      }
+    }
+
+    this.cache = {
+      featured: featured.length >= 4 ? featured : items.slice(0, 30),
+      movies: movies.length >= 4 ? movies : items.slice(0, 50),
+      series: series.length >= 4 ? series : items.slice(0, 50),
+      kids: kids.length >= 4 ? kids : items.slice(0, 30),
+      anime: anime.length >= 4 ? anime : items.slice(0, 30),
+      rowsByGroup
+    };
+
+    return this.cache;
+  }
+
+  private getDemoCatalog() {
+    const demos: VodItem[] = [
+      {
+        id: 'spiderman',
+        title: 'Spider-Man: Lejos de Casa',
+        category: 'destacado',
+        kind: 'destacado',
+        score: '8.4',
+        year: '2024',
+        duration: '02:09:00',
+        genres: ['Película', 'Acción', 'Aventura'],
+        synopsis: 'La realidad no es lo que parece cuando Spidey se enfrenta a los alucinantes poderes de Mysterio tras los eventos de Endgame.',
+        poster: 'assets/catalog/spiderman.jpg',
+        backdrop: 'assets/catalog/spiderman.jpg',
+        landscape: 'assets/catalog/spiderman.jpg'
+      },
+      {
+        id: 'matchbox',
+        title: 'Matchbox: La Película',
+        category: 'destacado',
+        kind: 'destacado',
+        score: '7.8',
+        year: '2024',
+        duration: '01:52:00',
+        genres: ['Acción', 'Velocidad'],
+        synopsis: 'Carreras a alta velocidad y desafíos extremos en una pista urbana donde solo el mejor piloto sobrevive.',
+        poster: 'assets/catalog/matchbox.jpg',
+        backdrop: 'assets/catalog/matchbox.jpg',
+        landscape: 'assets/catalog/matchbox.jpg'
+      },
+      {
+        id: 'tenzing',
+        title: 'Tenzing: En la cima',
+        category: 'destacado',
+        kind: 'destacado',
+        score: '8.1',
+        year: '2024',
+        duration: '02:08:00',
+        genres: ['Aventura', 'Drama'],
+        synopsis: 'La inspiradora historia de Tenzing Norgay y su épica ascensión junto a Edmund Hillary hacia el techo del mundo.',
+        poster: 'assets/catalog/tenzing.jpg',
+        backdrop: 'assets/catalog/tenzing.jpg',
+        landscape: 'assets/catalog/tenzing.jpg'
+      },
+      {
+        id: 'sacrifice',
+        title: 'Sacrifice',
+        category: 'destacado',
+        kind: 'destacado',
+        score: '7.5',
+        year: '2024',
+        duration: '01:48:00',
+        genres: ['Suspenso', 'Misterio'],
+        synopsis: 'Un secreto ancestral resucita en un remoto pueblo costero donde cada habitante parece ocultar una verdad perturbadora.',
+        poster: 'assets/catalog/sacrifice.jpg',
+        backdrop: 'assets/catalog/sacrifice.jpg'
+      },
+      {
+        id: 'masterplan',
+        title: 'El Gran Golpe',
+        category: 'destacado',
+        kind: 'destacado',
+        score: '8.0',
+        year: '2024',
+        duration: '02:04:00',
+        genres: ['Crimen', 'Acción'],
+        synopsis: 'Una banda de cerebros criminales planea el robo más sofisticado de la historia en el banco central de Ginebra.',
+        poster: 'assets/catalog/masterplan.jpg',
+        backdrop: 'assets/catalog/masterplan.jpg'
+      },
+      {
+        id: 'carrie',
+        title: 'Carrie: Revelación',
+        category: 'pelicula',
+        kind: 'pelicula',
+        score: '7.2',
+        year: '2024',
+        duration: '01:45:00',
+        genres: ['Terror', 'Drama'],
+        synopsis: 'Una joven marginada descubre que sus habilidades telequinéticas pueden ser su salvación o su total destrucción.',
+        poster: 'assets/catalog/carrie.jpg',
+        backdrop: 'assets/catalog/carrie.jpg'
+      },
+      {
+        id: 'fall2',
+        title: 'Vértigo Extremo',
+        category: 'pelicula',
+        kind: 'pelicula',
+        score: '7.4',
+        year: '2024',
+        duration: '01:54:00',
+        genres: ['Suspenso', 'Supervivencia'],
+        synopsis: 'Dos escaladoras quedan atrapadas en lo alto de una antena de comunicaciones desmantelada en pleno desierto.',
+        poster: 'assets/catalog/fall2.jpg',
+        backdrop: 'assets/catalog/fall2.jpg'
+      },
+      {
+        id: 'amor',
+        title: 'Amor en París',
+        category: 'pelicula',
+        kind: 'pelicula',
+        score: '7.6',
+        year: '2024',
+        duration: '01:40:00',
+        genres: ['Romance', 'Comedia'],
+        synopsis: 'Un encuentro fortuito en las orillas del Sena desencadena una semana inolvidable llena de magia y decisiones.',
+        poster: 'assets/catalog/amor.jpg',
+        backdrop: 'assets/catalog/amor.jpg'
+      },
+      {
+        id: 'animales',
+        title: 'Mundo Salvaje',
+        category: 'pelicula',
+        kind: 'pelicula',
+        score: '8.3',
+        year: '2024',
+        duration: '01:36:00',
+        genres: ['Documental', 'Aventura'],
+        synopsis: 'Un recorrido visual sin precedentes por los ecosistemas más recónditos de la Tierra narrado en 4K Ultra HD.',
+        poster: 'assets/catalog/animales.jpg',
+        backdrop: 'assets/catalog/animales.jpg'
+      },
+      {
+        id: 'marsupilami',
+        title: 'La Selva de Marsupilami',
+        category: 'pelicula',
+        kind: 'pelicula',
+        score: '7.0',
+        year: '2024',
+        duration: '01:35:00',
+        genres: ['Animación', 'Aventura'],
+        synopsis: 'El legendario animal de cola elástica lidera la defensa del bosque tropical contra invasores inesperados.',
+        poster: 'assets/catalog/marsupilami.jpg',
+        backdrop: 'assets/catalog/marsupilami.jpg'
+      },
+      {
+        id: 'cartas',
+        title: 'Cartas del Pasado',
+        category: 'pelicula',
+        kind: 'pelicula',
+        score: '7.9',
+        year: '2024',
+        duration: '01:58:00',
+        genres: ['Drama', 'Misterio'],
+        synopsis: 'Una serie de cartas sin abrir durante cincuenta años desvela una historia de pasión prohibida durante la guerra.',
+        poster: 'assets/catalog/cartas.jpg',
+        backdrop: 'assets/catalog/cartas.jpg'
+      },
+      {
+        id: 'hechizo',
+        title: 'Bajo el Hechizo',
+        category: 'pelicula',
+        kind: 'pelicula',
+        score: '7.3',
+        year: '2024',
+        duration: '01:42:00',
+        genres: ['Fantasía', 'Aventura'],
+        synopsis: 'Un antiguo medallón otorga visiones del porvenir a quien se atreva a pronunciar el conjuro guardado en las sombras.',
+        poster: 'assets/catalog/hechizo.jpg',
+        backdrop: 'assets/catalog/hechizo.jpg'
+      },
+      {
+        id: 'reacher',
+        title: 'Reacher',
+        category: 'serie',
+        kind: 'serie',
+        score: '8.8',
+        year: '2024',
+        duration: '8 Episodios',
+        genres: ['Acción', 'Crimen'],
+        synopsis: 'Un veterano investigador de la policía militar recorre Estados Unidos enfrentándose a conspiraciones letales.',
+        isSeries: true,
+        poster: 'assets/catalog/search-reacher.jpg',
+        backdrop: 'assets/catalog/search-reacher.jpg',
+        landscape: 'assets/catalog/search-reacher.jpg'
+      },
+      {
+        id: 'ted-lasso',
+        title: 'Ted Lasso',
+        category: 'serie',
+        kind: 'serie',
+        score: '8.9',
+        year: '2024',
+        duration: '12 Episodios',
+        genres: ['Comedia', 'Deportes'],
+        synopsis: 'Un bondadoso entrenador universitario de fútbol americano en EE.UU. viaja a Londres para dirigir un club de la Premier League inglesa.',
+        isSeries: true,
+        poster: 'assets/catalog/search-reacher.jpg',
+        backdrop: 'assets/catalog/spiderman.jpg',
+        landscape: 'assets/catalog/spiderman.jpg'
+      },
+      {
+        id: 'stick',
+        title: 'Stick: El swing perfecto',
+        category: 'serie',
+        kind: 'serie',
+        score: '8.5',
+        year: '2024',
+        duration: '10 Episodios',
+        genres: ['Comedia', 'Deportes'],
+        synopsis: 'Un prodigio del golf venido a menos busca redención liderando a un equipo de inadaptados hacia la gran final del circuito.',
+        isSeries: true,
+        poster: 'assets/catalog/search-outer-banks.jpg',
+        backdrop: 'assets/catalog/matchbox.jpg',
+        landscape: 'assets/catalog/matchbox.jpg'
+      },
+      {
+        id: 'the-dink',
+        title: 'The Dink',
+        category: 'pelicula',
+        kind: 'pelicula',
+        score: '7.6',
+        year: '2024',
+        duration: '01:48:00',
+        genres: ['Comedia', 'Deportes'],
+        synopsis: 'Un extenista profesional desesperado por salvar el club de su infancia se ve forzado a jugar en el torneo más ridículo y feroz de pickleball.',
+        poster: 'assets/catalog/fall2.jpg',
+        backdrop: 'assets/catalog/fall2.jpg',
+        landscape: 'assets/catalog/fall2.jpg'
+      },
+      {
+        id: 'swagger',
+        title: 'Swagger: Pasión por la cancha',
+        category: 'serie',
+        kind: 'serie',
+        score: '8.3',
+        year: '2024',
+        duration: '10 Episodios',
+        genres: ['Drama', 'Deportes'],
+        synopsis: 'Inspirada en las vivencias de Kevin Durant, la serie explora el mundo del baloncesto juvenil estadounidense y las familias que sueñan con triunfar.',
+        isSeries: true,
+        poster: 'assets/catalog/search-senor-cielos.jpg',
+        backdrop: 'assets/catalog/tenzing.jpg',
+        landscape: 'assets/catalog/tenzing.jpg'
+      },
+      {
+        id: 'acapulco',
+        title: 'Acapulco',
+        category: 'pelicula',
+        kind: 'pelicula',
+        score: '8.1',
+        year: '2024',
+        duration: '01:50:00',
+        genres: ['Comedia', 'Romance'],
+        synopsis: 'En 1984, el sueño de Máximo Gallardo se hace realidad cuando consigue el trabajo de su vida en Las Colinas, el resort más glamoroso de Acapulco.',
+        poster: 'assets/catalog/amor.jpg',
+        backdrop: 'assets/catalog/amor.jpg',
+        landscape: 'assets/catalog/amor.jpg'
+      },
+      {
+        id: 'palmer',
+        title: 'Palmer',
+        category: 'pelicula',
+        kind: 'pelicula',
+        score: '8.2',
+        year: '2024',
+        duration: '01:50:00',
+        genres: ['Drama'],
+        synopsis: 'Tras doce años en prisión, Eddie Palmer regresa a casa para rehacer su vida y forja un vínculo inesperado con un niño marginado.',
+        poster: 'assets/catalog/cartas.jpg',
+        backdrop: 'assets/catalog/cartas.jpg',
+        landscape: 'assets/catalog/cartas.jpg'
+      },
+      {
+        id: 'the-morning-show',
+        title: 'The Morning Show',
+        category: 'serie',
+        kind: 'serie',
+        score: '8.6',
+        year: '2024',
+        duration: '10 Episodios',
+        genres: ['Drama', 'Noticias'],
+        synopsis: 'Una mirada sincera y despiadada a las relaciones de poder entre hombres y mujeres que despiertan cada día a Estados Unidos.',
+        isSeries: true,
+        poster: 'assets/catalog/search-betty.jpg',
+        backdrop: 'assets/catalog/sacrifice.jpg',
+        landscape: 'assets/catalog/sacrifice.jpg'
+      },
+      {
+        id: 'amigos-vecinos',
+        title: 'Amigos y Vecinos',
+        category: 'pelicula',
+        kind: 'pelicula',
+        score: '7.8',
+        year: '2024',
+        duration: '01:42:00',
+        genres: ['Comedia', 'Drama'],
+        synopsis: 'Una comunidad suburbana aparentemente perfecta se ve revolucionada cuando un vecino extravagante decide desafiar todas las normas de convivencia.',
+        poster: 'assets/catalog/masterplan.jpg',
+        backdrop: 'assets/catalog/masterplan.jpg',
+        landscape: 'assets/catalog/masterplan.jpg'
+      },
+      {
+        id: 'greyhound',
+        title: 'Greyhound: En la mira del enemigo',
+        category: 'pelicula',
+        kind: 'pelicula',
+        score: '8.4',
+        year: '2024',
+        duration: '01:31:00',
+        genres: ['Bélica', 'Acción', 'Historia'],
+        synopsis: 'En los primeros días de la Segunda Guerra Mundial, un convoy internacional de 37 barcos aliados cruza el traicionero Atlántico Norte asediado por submarinos nazis.',
+        poster: 'assets/catalog/tenzing.jpg',
+        backdrop: 'assets/catalog/tenzing.jpg',
+        landscape: 'assets/catalog/tenzing.jpg'
+      },
+      {
+        id: 'plan-familiar',
+        title: 'Plan Familiar',
+        category: 'pelicula',
+        kind: 'pelicula',
+        score: '7.9',
+        year: '2024',
+        duration: '01:58:00',
+        genres: ['Acción', 'Comedia'],
+        synopsis: 'Un devoto padre de familia suburbana debe huir por carretera con su esposa e hijos cuando su pasado como asesino de élite del gobierno lo alcanza.',
+        poster: 'assets/catalog/matchbox.jpg',
+        backdrop: 'assets/catalog/matchbox.jpg',
+        landscape: 'assets/catalog/matchbox.jpg'
+      },
+      {
+        id: 'fundacion',
+        title: 'Fundación',
+        category: 'serie',
+        kind: 'serie',
+        score: '8.7',
+        year: '2024',
+        duration: '10 Episodios',
+        genres: ['Ciencia Ficción', 'Aventura'],
+        synopsis: 'Basada en las premiadas novelas de Isaac Asimov, narra la épica travesía de un grupo de exiliados para salvar a la humanidad de la caída del Imperio Galáctico.',
+        isSeries: true,
+        poster: 'assets/catalog/search-one-piece.jpg',
+        backdrop: 'assets/catalog/fall2.jpg',
+        landscape: 'assets/catalog/fall2.jpg'
+      },
+      {
+        id: 'f1-movie',
+        title: 'F1: La Película',
+        category: 'pelicula',
+        kind: 'pelicula',
+        score: '8.8',
+        year: '2025',
+        duration: '02:15:00',
+        genres: ['Deportes', 'Acción', 'Drama'],
+        synopsis: 'Un veterano piloto de carreras sale de su retiro para competir como mentor junto a un joven novato en el equipo más competitivo de la Fórmula 1.',
+        poster: 'assets/catalog/spiderman.jpg',
+        backdrop: 'assets/catalog/spiderman.jpg',
+        landscape: 'assets/catalog/spiderman.jpg'
+      },
+      {
+        id: 'outer-banks',
+        title: 'Outer Banks',
+        category: 'serie',
+        kind: 'serie',
+        score: '8.2',
+        year: '2024',
+        duration: '10 Episodios',
+        genres: ['Aventura', 'Drama'],
+        synopsis: 'Un grupo de adolescentes en una isla costera sigue un mapa del tesoro que destapa una conspiración de alto nivel.',
+        isSeries: true,
+        poster: 'assets/catalog/search-outer-banks.jpg',
+        backdrop: 'assets/catalog/search-outer-banks.jpg',
+        landscape: 'assets/catalog/search-outer-banks.jpg'
+      },
+      {
+        id: 'one-piece',
+        title: 'One Piece',
+        category: 'serie',
+        kind: 'serie',
+        score: '8.9',
+        year: '2024',
+        duration: '8 Episodios',
+        genres: ['Aventura', 'Fantasía'],
+        synopsis: 'Monkey D. Luffy y su tripulación pirata zarpan en busca del tesoro definitivo para proclamarse Rey de los Piratas.',
+        isSeries: true,
+        poster: 'assets/catalog/search-one-piece.jpg',
+        backdrop: 'assets/catalog/search-one-piece.jpg',
+        landscape: 'assets/catalog/search-one-piece.jpg'
+      },
+      {
+        id: 'senor-cielos',
+        title: 'El Señor de los Cielos',
+        category: 'serie',
+        kind: 'serie',
+        score: '8.0',
+        year: '2024',
+        duration: '12 Episodios',
+        genres: ['Acción', 'Drama'],
+        synopsis: 'La vida y leyenda de Aurelio Casillas y su imperio en los cielos con aviones de carga cargados de poder.',
+        isSeries: true,
+        poster: 'assets/catalog/search-senor-cielos.jpg',
+        backdrop: 'assets/catalog/search-senor-cielos.jpg',
+        landscape: 'assets/catalog/search-senor-cielos.jpg'
+      },
+      {
+        id: 'chapo',
+        title: 'El Chapo',
+        category: 'serie',
+        kind: 'serie',
+        score: '8.1',
+        year: '2024',
+        duration: '9 Episodios',
+        genres: ['Crimen', 'Biografía'],
+        synopsis: 'Crónica dramática del ascenso, captura y escape del legendario capo de la droga.',
+        isSeries: true,
+        poster: 'assets/catalog/search-chapo.jpg',
+        backdrop: 'assets/catalog/search-chapo.jpg',
+        landscape: 'assets/catalog/search-chapo.jpg'
+      },
+      {
+        id: 'betty',
+        title: 'Betty la Fea: La Historia Continúa',
+        category: 'serie',
+        kind: 'serie',
+        score: '8.3',
+        year: '2024',
+        duration: '10 Episodios',
+        genres: ['Comedia', 'Drama'],
+        synopsis: 'Veinte años después, Beatriz Pinzón Solano sigue construyendo su legado en Ecomoda frente a nuevos desafíos.',
+        isSeries: true,
+        poster: 'assets/catalog/search-betty.jpg',
+        backdrop: 'assets/catalog/search-betty.jpg',
+        landscape: 'assets/catalog/search-betty.jpg'
+      },
+      {
+        id: 'cuatro-manos',
+        title: 'Cuatro manos, dos hermanas',
+        category: 'serie',
+        kind: 'serie',
+        score: '9.0',
+        year: '2024',
+        duration: '8 Episodios',
+        genres: ['Drama', 'Música'],
+        synopsis: 'Dos pianistas prodigio deben superar la rivalidad familiar para salvar la academia de música de su infancia.',
+        isSeries: true,
+        poster: 'assets/catalog/search-cuatro-manos.jpg',
+        backdrop: 'assets/catalog/search-cuatro-manos.jpg',
+        landscape: 'assets/catalog/search-cuatro-manos.jpg'
+      },
+      {
+        id: 'linternas',
+        title: 'Linternas',
+        category: 'serie',
+        kind: 'serie',
+        score: '8.8',
+        year: '2024',
+        duration: '8 Episodios',
+        genres: ['Acción', 'Ciencia Ficción'],
+        synopsis: 'Dos guardianes interestelares son enviados al corazón de la Tierra para investigar un oscuro secreto.',
+        isSeries: true,
+        poster: 'assets/catalog/search-linternas.jpg',
+        backdrop: 'assets/catalog/search-linternas.jpg',
+        landscape: 'assets/catalog/search-linternas.jpg'
+      },
+      {
+        id: 'secret-woman',
+        title: 'Una mujer sin pasado',
+        category: 'serie',
+        kind: 'serie',
+        score: '7.9',
+        year: '2024',
+        duration: '12 Episodios',
+        genres: ['Misterio', 'Suspenso'],
+        synopsis: 'Al despertar sin recuerdos en una clínica privada, una mujer descubre pistas sobre un complot que pone en jaque al gobierno.',
+        isSeries: true,
+        poster: 'assets/catalog/search-secret-woman.jpg',
+        backdrop: 'assets/catalog/search-secret-woman.jpg',
+        landscape: 'assets/catalog/search-secret-woman.jpg'
+      },
+      {
+        id: 'the-general',
+        title: 'El maquinista de la General',
+        category: 'pelicula',
+        kind: 'pelicula',
+        score: '8.3',
+        year: '1926',
+        duration: '01:18:00',
+        genres: ['Comedia', 'Acción', 'Clásico'],
+        synopsis: 'Un maquinista persigue a los espías que robaron su locomotora y secuestraron a su prometida.',
+        poster: 'assets/catalog/the-general.jpg',
+        backdrop: 'assets/catalog/the-general.jpg',
+        landscape: 'assets/catalog/the-general.jpg'
+      },
+      {
+        id: 'sintel',
+        title: 'Sintel: La leyenda del dragón',
+        category: 'pelicula',
+        kind: 'pelicula',
+        score: '8.0',
+        year: '2024',
+        duration: '01:15:00',
+        genres: ['Animación', 'Fantasía', 'Aventura'],
+        synopsis: 'Una joven solitaria cruza un mundo hostil para reencontrarse con el dragón que crió de cachorro.',
+        poster: 'assets/catalog/sintel.jpg',
+        backdrop: 'assets/catalog/sintel.jpg',
+        landscape: 'assets/catalog/sintel.jpg'
+      },
+      {
+        id: 'minions',
+        title: 'Minions: Fiebre Tropical',
+        category: 'kids',
+        kind: 'kids',
+        score: '7.7',
+        year: '2024',
+        duration: '01:30:00',
+        genres: ['Animación', 'Comedia', 'Infantil'],
+        synopsis: 'Los pequeños secuaces amarillos causan el descontrol más divertido mientras buscan al villano más temido del planeta.',
+        poster: 'assets/catalog/search-minions.jpg',
+        backdrop: 'assets/catalog/search-minions.jpg',
+        landscape: 'assets/catalog/search-minions.jpg'
+      }
+    ];
+
+    return this.categorize(demos);
+  }
+
+  public async getVodDetail(item: VodItem): Promise<{
+    item: VodItem;
+    episodes: VodEpisode[];
+    seasons: VodSeason[];
+  }> {
+    if (!item) {
+      throw new Error('Item required');
+    }
+
+    // 1. If MagisClient is available on TV (with 1200ms timeout protection)
+    if (window.MagisClient && typeof window.MagisClient.detail === 'function') {
+      try {
+        const timeoutPromise = new Promise<any>((_, reject) =>
+          setTimeout(() => reject(new Error('Detail request timeout')), 1200)
+        );
+
+        const fetchPromise = new Promise<any>((resolve, reject) => {
+          try {
+            window.MagisClient.detail(item.id, (err: any, data: any) => {
+              if (err) return reject(err);
+              resolve(data);
+            });
+          } catch (err) {
+            reject(err);
+          }
+        });
+
+        const res = await Promise.race([fetchPromise, timeoutPromise]);
+
+        if (res && res.item) {
+          const detailItem = normalizeItem(res.item, 0);
+          if (!detailItem.backdrop && item.backdrop) detailItem.backdrop = item.backdrop;
+          if (!detailItem.poster && item.poster) detailItem.poster = item.poster;
+          if (!detailItem.landscape && item.landscape) detailItem.landscape = item.landscape;
+
+          const episodes: VodEpisode[] = (res.episodes || []).map((ep: any, idx: number) => ({
+            id: String(ep.id || ep.contentId || idx + 1),
+            title: ep.title || ep.name || `Capítulo ${idx + 1}`,
+            name: ep.title || ep.name || `Capítulo ${idx + 1}`,
+            number: ep.number || idx + 1,
+            duration: ep.duration ? `${ep.duration} min` : '45 min',
+            quality: ep.quality || 'HD',
+            streamUrl: ep.streamUrl || '',
+            picture: ep.picture || ep.pic || ep.image || ep.cover || item.landscape || item.backdrop || item.poster || '',
+            description: ep.description || ep.desc || ep.synopsis || 'Sin descripción disponible para este episodio.'
+          }));
+
+          const seasons: VodSeason[] = (res.seasons || []).map((s: any, sIdx: number) => ({
+            id: String(s.id || sIdx + 1),
+            name: s.name || `Temporada ${s.number || sIdx + 1}`,
+            number: s.number || sIdx + 1,
+            episodes: []
+          }));
+
+          return {
+            item: detailItem,
+            episodes: episodes.length > 0 ? episodes : (item.isSeries ? this.getMockEpisodes(item) : []),
+            seasons: seasons.length > 0 ? seasons : (item.isSeries ? [{ id: '1', name: 'Temporada 1', number: 1, episodes: [] }] : [])
+          };
+        }
+      } catch (e) {
+        console.warn('[CatalogService] MagisClient.detail failed, using local/demo detail:', e);
+      }
+    }
+
+    // 2. Fallback for demo/offline items
+    const isSeriesItem = Boolean(item.isSeries || item.kind === 'serie' || (item as any).type === 'teleplay');
+    return {
+      item: { ...item, isSeries: isSeriesItem },
+      episodes: isSeriesItem ? this.getMockEpisodes(item) : [],
+      seasons: isSeriesItem ? [
+        { id: '1', name: 'Temporada 1', number: 1, episodes: [] },
+        { id: '2', name: 'Temporada 2', number: 2, episodes: [] }
+      ] : []
+    };
+  }
+
+  private getMockEpisodes(item: VodItem): VodEpisode[] {
+    const eps: VodEpisode[] = [];
+    const count = 10;
+    for (let i = 1; i <= count; i++) {
+      eps.push({
+        id: `${item.id}-ep-${i}`,
+        number: i,
+        title: `Capítulo ${i}: ${this.getEpisodeTitle(i)}`,
+        name: `Capítulo ${i}`,
+        duration: `${42 + (i % 8)} min`,
+        quality: '4K HDR',
+        picture: item.landscape || item.backdrop || item.poster || '',
+        description: `Tras los sucesos del capítulo anterior, el equipo debe tomar una decisión crítica que cambiará el destino de todos.`
+      });
+    }
+    return eps;
+  }
+
+  private getEpisodeTitle(num: number): string {
+    const titles = [
+      'El Comienzo',
+      'Secretos Ocultos',
+      'La Revelación',
+      'Punto de Inflexión',
+      'Sin Retorno',
+      'Venganza',
+      'La Caída',
+      'El Resurgir',
+      'La Batalla Final',
+      'El Desenlace'
+    ];
+    return titles[(num - 1) % titles.length];
+  }
+}
+
+export const catalogService = new CatalogService();

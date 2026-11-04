@@ -1,0 +1,149 @@
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import path from 'path';
+import http from 'http';
+import https from 'https';
+import { URL } from 'url';
+import { tvCompatPlugin } from './vite-tv-compat';
+
+function streamProxyPlugin() {
+  const handler = async (req: any, res: any) => {
+    // Handle CORS Preflight
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', '*');
+    if (req.method === 'OPTIONS') {
+      res.statusCode = 204;
+      return res.end();
+    }
+
+    try {
+      const reqUrl = new URL(req.url, 'http://localhost');
+      const targetUrl = reqUrl.searchParams.get('url');
+      if (!targetUrl) {
+        res.statusCode = 400;
+        return res.end('Missing url param');
+      }
+
+      const auth = reqUrl.searchParams.get('auth') || '';
+      const license = reqUrl.searchParams.get('license') || '';
+
+      const headers: Record<string, string> = {
+        'User-Agent': 'Ranger/4.9.4-17294ac0',
+        'App': 'com.android.msandroid',
+        'App-Version': '49902',
+        'X-Buffer': '0'
+      };
+      if (auth) headers['Content-Auth'] = auth;
+      if (license) headers['Content-License'] = license;
+      if (req.headers.range) headers['Range'] = req.headers.range;
+
+      const isHttps = targetUrl.startsWith('https:');
+      const mod = isHttps ? https : http;
+
+      const targetReq = mod.request(targetUrl, { method: req.method || 'GET', headers }, (targetRes) => {
+        const status = targetRes.statusCode || 200;
+        const contentType = targetRes.headers['content-type'] || '';
+        const isM3u8 = targetUrl.includes('.m3u8') || contentType.includes('mpegurl');
+
+        if (isM3u8 && status === 200 && req.method !== 'HEAD') {
+          const chunks: Buffer[] = [];
+          targetRes.on('data', (c) => chunks.push(c));
+          targetRes.on('end', () => {
+            const text = Buffer.concat(chunks).toString('utf8');
+            const lines = text.split('\n');
+            const rewritten = lines.map((line) => {
+              const trimmed = line.trim();
+              if (!trimmed || trimmed.startsWith('#')) return line;
+              const absoluteUrl = new URL(trimmed, targetUrl).toString();
+              return `/stream-proxy?url=${encodeURIComponent(absoluteUrl)}&auth=${encodeURIComponent(auth)}&license=${encodeURIComponent(license)}`;
+            }).join('\n');
+
+            res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+            res.setHeader('Content-Length', Buffer.byteLength(rewritten));
+            res.statusCode = 200;
+            res.end(rewritten);
+          });
+        } else {
+          res.statusCode = status;
+          if (contentType) res.setHeader('Content-Type', contentType);
+          if (targetRes.headers['content-length']) res.setHeader('Content-Length', targetRes.headers['content-length']);
+          if (targetRes.headers['content-range']) res.setHeader('Content-Range', targetRes.headers['content-range']);
+          if (targetRes.headers['accept-ranges']) res.setHeader('Accept-Ranges', targetRes.headers['accept-ranges']);
+          targetRes.pipe(res);
+        }
+      });
+
+      req.on('close', () => {
+        targetReq.destroy();
+      });
+
+      targetReq.on('error', (err) => {
+        console.error('[StreamProxy] Error fetching:', targetUrl, err.message);
+        if (!res.headersSent) {
+          res.statusCode = 502;
+          res.end(err.message);
+        }
+      });
+
+      targetReq.end();
+    } catch (err: any) {
+      console.error('[StreamProxy] Request error:', err);
+      res.statusCode = 500;
+      res.end(err.message);
+    }
+  };
+
+  return {
+    name: 'magis-stream-proxy',
+    configureServer(server: any) {
+      server.middlewares.use('/stream-proxy', handler);
+    },
+    configurePreviewServer(server: any) {
+      server.middlewares.use('/stream-proxy', handler);
+    }
+  };
+}
+
+// https://vitejs.dev/config/
+export default defineConfig({
+  plugins: [react(), streamProxyPlugin(), tvCompatPlugin()],
+  base: './',
+  server: {
+    port: 5173,
+    host: true,
+    proxy: {
+      '/api/portalCore': {
+        target: 'https://ftmrmy.jdfey0cd.com',
+        changeOrigin: true,
+        secure: false,
+        headers: {
+          'User-Agent': 'okhttp/3.12.12',
+          'apk': 'com.android.msandroid',
+          'apkVer': '43404',
+          'spkgVer': '2024-09-10 06:25:30_33_13_'
+        }
+      }
+    }
+  },
+  build: {
+    outDir: 'dist',
+    emptyOutDir: true,
+    // Tizen 4.0 (2018 TVs) ships Chromium 56: lower JS syntax so older models parse the bundle
+    target: 'chrome56',
+    cssTarget: 'chrome56',
+    // Keep a real stylesheet (iife output would otherwise inject CSS from JS)
+    cssCodeSplit: false,
+    rollupOptions: {
+      // Classic script instead of an ES module: Chromium < 61 cannot run type="module"
+      output: { format: 'iife' }
+    },
+    assetsDir: 'assets',
+    sourcemap: false
+  },
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, './src')
+    }
+  }
+});

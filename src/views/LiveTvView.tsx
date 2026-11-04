@@ -1,0 +1,1032 @@
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { LiveChannel, LiveCategory } from '../types/channel';
+import { playerService } from '../services/playerService';
+import { getMockChannelsForCategory } from '../services/mockLiveChannels';
+import { parentalService } from '../services/parentalService';
+import { OnScreenKeyboard, KbState, KB_INITIAL } from '../components/live/OnScreenKeyboard';
+import { normalizeText } from '../utils/normalizeText';
+
+declare global {
+  interface Window {
+    MagisClient?: any;
+    XuperAVPlay?: any;
+    webapis?: any;
+  }
+}
+
+export const DEFAULT_LIVE_CATEGORIES: LiveCategory[] = [
+  { id: 'favs', name: '★ Favoritos', isFav: true },
+  { id: 76182, name: 'Todos los canales' },
+  { id: 76206, name: 'Deportes en Vivo' },
+  { id: 76205, name: 'Cine & Series 24/7' },
+  { id: 76188, name: 'Colombia' },
+  { id: 76191, name: 'España' },
+  { id: 76197, name: 'México' },
+  { id: 76190, name: 'Argentina' },
+  { id: 76195, name: 'Chile & Perú' },
+  { id: 76189, name: 'Venezuela' },
+  { id: 76192, name: 'Ecuador' },
+  { id: 76193, name: 'Bolivia' },
+  { id: 76194, name: 'Uruguay' },
+  { id: 76196, name: 'Paraguay' },
+  { id: 76198, name: 'Panamá' },
+  { id: 76199, name: 'Puerto Rico' },
+  { id: 76200, name: 'Costa Rica' },
+  { id: 76201, name: 'Estados Unidos' },
+  { id: 76202, name: 'República Dominicana' },
+  { id: 76203, name: 'Guatemala' },
+  { id: 76204, name: 'Honduras' },
+  { id: 76207, name: 'El Salvador' },
+  { id: 76208, name: 'Nicaragua' },
+  { id: 76209, name: 'Brasil' },
+  { id: 76210, name: 'Infantiles' },
+  { id: 76211, name: 'Noticias' },
+  { id: 76212, name: 'Música' },
+  { id: 76213, name: 'Documentales' },
+  { id: 76214, name: 'Religiosos' },
+  { id: 76215, name: 'Canales Premium' },
+  { id: 76216, name: 'Variedades' },
+  { id: 76217, name: 'Cultura y Ciencia' },
+  { id: 76218, name: 'Anime 24/7' },
+  { id: 76219, name: 'Retro TV' },
+  { id: 76220, name: 'Series Retro' },
+  { id: 76221, name: 'Cine Acción' },
+  { id: 76222, name: 'Cine Comedia' },
+  { id: 76223, name: 'Cine Terror' },
+  { id: 76224, name: 'Eventos PPV' },
+  { id: 'addons', name: '➕ Addons M3U', isM3u: true }
+];
+
+export interface LiveTvFocus {
+  area: 'cats' | 'channels' | 'preview_btns';
+  catIndex: number;
+  selectedCatIndex?: number;
+  channelIndex: number;
+  btnIndex: number; // 0 = Fullscreen (inside the preview), 1 = Favorite (below the preview)
+}
+
+interface LiveTvViewProps {
+  focus: LiveTvFocus;
+  isActiveTab?: boolean;
+  isFocusActive?: boolean;
+  isFullscreen: boolean;
+  tunedChannel: LiveChannel | null;
+  favMap: Record<string, boolean>;
+  showOsd?: boolean;
+  showChannelsDrawer?: boolean;
+  drawerFocusIndex?: number;
+  drawerArea?: 'cats' | 'channels' | 'search' | 'searchbtn';
+  drawerQuery?: string;
+  drawerKb?: KbState;
+  onDrawerResults?: (channels: LiveChannel[]) => void;
+  drawerCatIndex?: number;
+  fullscreenFocusBtn?: 'none' | 'channels' | 'fav';
+  onTuneChannel: (channel: LiveChannel) => void;
+  onEnterFullscreen: (channel: LiveChannel) => void;
+  onExitFullscreen: () => void;
+  onToggleFavorite: (channel: LiveChannel) => void;
+  onToggleChannelsDrawer: () => void;
+  onToggleOsd: () => void;
+  onChannelsLoaded?: (channels: LiveChannel[]) => void;
+  onCategoriesLoaded?: (categories: LiveCategory[]) => void;
+  onSelectCategory?: (catIndex: number) => void;
+}
+
+// Global in-memory cache for ultra-fast instant category switching
+const categoryChannelsCache = new Map<string, LiveChannel[]>();
+
+// True only for real schedules like "20:00 - 21:30"; labels such as "EN VIVO" are not times.
+const hasClockTime = (t?: string): boolean => !!t && /\d/.test(t);
+
+// Hides channels that belong to a PIN-locked category (so they cannot leak through
+// "Favoritos" or aggregate categories such as "Todos los canales").
+function filterLockedChannels(list: LiveChannel[], cats: LiveCategory[], activeId: string): LiveChannel[] {
+  const lockedCats = cats.filter(c => !c.isFav && String(c.id) !== activeId && parentalService.isLiveCatLocked(c.id));
+  if (lockedCats.length === 0) return list;
+  const blocked = new Set<string>();
+  lockedCats.forEach(c => {
+    (categoryChannelsCache.get(String(c.id)) || []).forEach(ch => {
+      blocked.add(String(ch.id));
+      if (ch.code) blocked.add(String(ch.code));
+    });
+  });
+  if (blocked.size === 0) return list;
+  return list.filter(ch => !blocked.has(String(ch.id)) && !(ch.code && blocked.has(String(ch.code))));
+}
+const globalChannelMasterCache: Record<string, LiveChannel> = {};
+
+export const LiveTvView: React.FC<LiveTvViewProps> = ({
+  focus,
+  isActiveTab = true,
+  isFocusActive = true,
+  isFullscreen,
+  tunedChannel,
+  favMap,
+  showOsd = false,
+  showChannelsDrawer = false,
+  drawerFocusIndex = 0,
+  drawerArea = 'channels',
+  drawerQuery = '',
+  drawerKb = KB_INITIAL,
+  onDrawerResults,
+  drawerCatIndex = 0,
+  fullscreenFocusBtn = 'none',
+  onTuneChannel,
+  onEnterFullscreen,
+  onExitFullscreen,
+  onToggleFavorite,
+  onToggleChannelsDrawer,
+  onToggleOsd,
+  onChannelsLoaded,
+  onCategoriesLoaded,
+  onSelectCategory
+}) => {
+  const savedCatIdx = useMemo(() => {
+    try {
+      const v = localStorage.getItem('xuper_last_live_cat_idx');
+      if (v !== null) {
+        const parsed = parseInt(v, 10);
+        if (!isNaN(parsed)) return parsed;
+      }
+    } catch {}
+    return 4;
+  }, []);
+  const selectedCatIndex = focus.selectedCatIndex !== undefined ? focus.selectedCatIndex : savedCatIdx;
+  const [categories, setCategories] = useState<LiveCategory[]>(DEFAULT_LIVE_CATEGORIES);
+  const [channels, setChannels] = useState<LiveChannel[]>([]);
+  const [isLoadingChannels, setIsLoadingChannels] = useState<boolean>(true);
+  const [lockTick, setLockTick] = useState<number>(0);
+
+  // Re-filter channel lists when the parental settings or the session lock change
+  useEffect(() => parentalService.subscribe(() => setLockTick(t => t + 1)), []);
+  const [liveClock, setLiveClock] = useState<string>('20:00');
+
+  const catListRef = useRef<HTMLDivElement>(null);
+  const channelListRef = useRef<HTMLDivElement>(null);
+  const drawerListRef = useRef<HTMLDivElement>(null);
+  const drawerCatsRef = useRef<HTMLDivElement>(null);
+  const previewVideoRef = useRef<HTMLVideoElement>(null);
+  const channelMasterCache = useRef<Record<string, LiveChannel>>(globalChannelMasterCache);
+
+  // Live Clock updater for InfoBar OSD
+  useEffect(() => {
+    const updateTime = () => {
+      const d = new Date();
+      const hrs = d.getHours();
+      const mins = d.getMinutes().toString().padStart(2, '0');
+      const ampm = hrs >= 12 ? 'PM' : 'AM';
+      const h12 = hrs % 12 || 12;
+      setLiveClock(`${h12}:${mins} ${ampm}`);
+    };
+    updateTime();
+    const timer = setInterval(updateTime, 15000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Fast direct scrolling without animation lag - native nearest scroll
+  useEffect(() => {
+    if (!isFullscreen && isFocusActive && focus.area === 'cats' && catListRef.current) {
+      const container = catListRef.current;
+      if (focus.catIndex === 0) {
+        container.scrollTop = 0;
+        return;
+      }
+      if (focus.catIndex === categories.length - 1) {
+        container.scrollTop = container.scrollHeight;
+        return;
+      }
+      const target = container.children[focus.catIndex] as HTMLElement;
+      if (target) {
+        if (typeof target.scrollIntoView === 'function') {
+          target.scrollIntoView({ block: 'nearest' });
+        } else {
+          const i = target.getBoundingClientRect();
+          const a = container.getBoundingClientRect();
+          if (i.top < a.top + 8) {
+            container.scrollTop -= (a.top - i.top + 16);
+          } else if (i.bottom > a.bottom - 8) {
+            container.scrollTop += (i.bottom - a.bottom + 16);
+          }
+        }
+      }
+    }
+  }, [isFullscreen, isFocusActive, focus.area, focus.catIndex, categories.length]);
+
+  useEffect(() => {
+    if (!isFullscreen && isFocusActive && focus.area === 'channels' && channelListRef.current) {
+      const container = channelListRef.current;
+      if (focus.channelIndex === 0) {
+        container.scrollTop = 0;
+        return;
+      }
+      if (focus.channelIndex === channels.length - 1) {
+        container.scrollTop = container.scrollHeight;
+        return;
+      }
+      const target = container.children[focus.channelIndex] as HTMLElement;
+      if (target) {
+        if (typeof target.scrollIntoView === 'function') {
+          target.scrollIntoView({ block: 'nearest' });
+        } else {
+          const i = target.getBoundingClientRect();
+          const a = container.getBoundingClientRect();
+          if (i.top < a.top + 8) {
+            container.scrollTop -= (a.top - i.top + 16);
+          } else if (i.bottom > a.bottom - 8) {
+            container.scrollTop += (i.bottom - a.bottom + 16);
+          }
+        }
+      }
+    }
+  }, [isFullscreen, isFocusActive, focus.area, focus.channelIndex, channels.length]);
+
+  useEffect(() => {
+    if (isFullscreen && showChannelsDrawer && drawerListRef.current) {
+      const container = drawerListRef.current;
+      if (drawerFocusIndex === 0) {
+        container.scrollTop = 0;
+        return;
+      }
+      if (drawerFocusIndex === channels.length - 1) {
+        container.scrollTop = container.scrollHeight;
+        return;
+      }
+      const target = container.children[drawerFocusIndex] as HTMLElement;
+      if (target) {
+        if (typeof target.scrollIntoView === 'function') {
+          target.scrollIntoView({ block: 'nearest' });
+        } else {
+          const i = target.getBoundingClientRect();
+          const a = container.getBoundingClientRect();
+          if (i.top < a.top + 12) {
+            container.scrollTop -= (a.top - i.top + 20);
+          } else if (i.bottom > a.bottom - 12) {
+            container.scrollTop += (i.bottom - a.bottom + 20);
+          }
+        }
+      }
+    }
+  }, [isFullscreen, showChannelsDrawer, drawerFocusIndex, channels.length]);
+
+  // Keep the category cursor of the fullscreen drawer visible
+  useEffect(() => {
+    if (!isFullscreen || !showChannelsDrawer || !drawerCatsRef.current) return;
+    const el = drawerCatsRef.current.children[drawerCatIndex] as HTMLElement | undefined;
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
+  }, [isFullscreen, showChannelsDrawer, drawerCatIndex, drawerArea]);
+
+  // Drawer search: looks through every channel already loaded (all categories)
+  const drawerResults = useMemo(() => {
+    const q = normalizeText(drawerQuery.trim());
+    if (!q) return [] as LiveChannel[];
+    const seen = new Set<string>();
+    const found: LiveChannel[] = [];
+    const pool = [...channels, ...Object.values(channelMasterCache.current)];
+    for (const ch of pool) {
+      const key = String(ch.id || ch.code);
+      if (seen.has(key)) continue;
+      if (normalizeText(ch.name).includes(q) || normalizeText(ch.code).includes(q)) {
+        seen.add(key);
+        found.push(ch);
+      }
+    }
+    return filterLockedChannels(found, categories, '').slice(0, 60);
+  }, [drawerQuery, channels, categories, lockTick]);
+
+  useEffect(() => {
+    if (onDrawerResults) onDrawerResults(drawerResults);
+  }, [drawerResults]);
+
+  const drawerSearching = drawerQuery.trim().length > 0;
+  const drawerChannels = drawerSearching ? drawerResults : channels;
+
+
+  // Load Categories on mount and notify parent
+  useEffect(() => {
+    if (window.MagisClient && typeof window.MagisClient.getLiveCategories === 'function') {
+      window.MagisClient.getLiveCategories((err: any, cats: any[]) => {
+        if (!err && Array.isArray(cats) && cats.length) {
+          const formatted: LiveCategory[] = cats.map(c => ({ id: c.id || c.columnId, name: c.name || c.title }));
+          const allCats = [{ id: 'favs', name: '★ Favoritos', isFav: true }, ...formatted];
+          setCategories(allCats);
+          if (onCategoriesLoaded) onCategoriesLoaded(allCats);
+        } else {
+          if (onCategoriesLoaded) onCategoriesLoaded(DEFAULT_LIVE_CATEGORIES);
+        }
+      });
+    } else {
+      if (onCategoriesLoaded) onCategoriesLoaded(DEFAULT_LIVE_CATEGORIES);
+    }
+  }, []);
+
+  const activeCategory = categories[selectedCatIndex] || categories[0];
+
+  // Background Preloader: prefetch and cache channels & logos for ALL categories
+  useEffect(() => {
+    if (!categories || categories.length <= 1) return;
+    if (!window.MagisClient || typeof window.MagisClient.getLiveChannels !== 'function') return;
+
+    let isCancelled = false;
+    let idx = 0;
+
+    const prefetchStep = () => {
+      if (isCancelled) return;
+      if (idx >= categories.length) {
+        // all categories cached: re-apply the parental filter to aggregate lists
+        setLockTick(t => t + 1);
+        return;
+      }
+      const cat = categories[idx++];
+
+      if (!cat || cat.id === 'favs') {
+        setTimeout(prefetchStep, 40);
+        return;
+      }
+
+      const catKey = String(cat.id);
+
+      // Check if already in memory cache
+      if (categoryChannelsCache.has(catKey)) {
+        setTimeout(prefetchStep, 40);
+        return;
+      }
+
+      // Check localStorage cache
+      try {
+        const cached = localStorage.getItem('xuper_live_ch_cache_v2_' + catKey);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (parsed && Array.isArray(parsed.channels) && parsed.channels.length) {
+            categoryChannelsCache.set(catKey, parsed.channels);
+            parsed.channels.forEach((c: LiveChannel) => {
+              channelMasterCache.current[String(c.id || c.code)] = c;
+            });
+            setTimeout(prefetchStep, 40);
+            return;
+          }
+        }
+      } catch (e) {}
+
+      // Fetch from API in background
+      window.MagisClient.getLiveChannels(catKey, 1, 50, (err: any, list: any[]) => {
+        if (isCancelled) return;
+        if (!err && Array.isArray(list) && list.length) {
+          const chs: LiveChannel[] = list.map((c, i) => ({
+            id: c.channelCode || c.id || i,
+            name: c.name || c.channelName || 'Canal',
+            code: c.channelCode || String(c.id || ''),
+            url: c.streamUrl || '',
+            logo: c.logo || c.channelLogo || '',
+            now: c.now || c.currentProgram || 'Transmisión en directo',
+            next: c.next || c.nextProgram || 'Continuación de programación',
+            time: c.time || 'EN VIVO',
+            isFav: !!favMap[String(c.channelCode || c.id)]
+          }));
+
+          chs.forEach(c => {
+            channelMasterCache.current[String(c.id || c.code)] = c;
+            // Preload logo image in browser cache
+            if (c.logo) {
+              const img = new Image();
+              img.src = c.logo;
+            }
+          });
+
+          categoryChannelsCache.set(catKey, chs);
+
+          try {
+            localStorage.setItem('xuper_live_ch_cache_v2_' + catKey, JSON.stringify({ at: Date.now(), channels: chs }));
+          } catch (e) {}
+        }
+        setTimeout(prefetchStep, 100);
+      });
+    };
+
+    const startTimer = setTimeout(prefetchStep, 300);
+    return () => {
+      isCancelled = true;
+      clearTimeout(startTimer);
+    };
+  }, [categories, favMap]);
+
+  // Fetch Channels when active category changes (0ms instant if cached in memory!)
+  useEffect(() => {
+    if (!activeCategory) return;
+    const catId = String(activeCategory.id);
+
+    if (activeCategory.isFav) {
+      const allKnown = Object.values(channelMasterCache.current);
+      const favChannels = filterLockedChannels(allKnown.filter(c => favMap[String(c.id || c.code)]), categories, catId);
+      setChannels(favChannels);
+      setIsLoadingChannels(false);
+      if (onChannelsLoaded) onChannelsLoaded(favChannels);
+      return;
+    }
+
+    // 1. In-memory cache: 0ms instant display!
+    if (categoryChannelsCache.has(catId)) {
+      const cached = filterLockedChannels(categoryChannelsCache.get(catId)!, categories, catId);
+      setChannels(cached);
+      setIsLoadingChannels(false);
+      if (onChannelsLoaded) onChannelsLoaded(cached);
+      return;
+    }
+
+    // 2. LocalStorage cache: 0ms instant display!
+    try {
+      const cached = localStorage.getItem('xuper_live_ch_cache_v2_' + catId);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed && Array.isArray(parsed.channels) && parsed.channels.length) {
+          categoryChannelsCache.set(catId, parsed.channels);
+          const visible = filterLockedChannels(parsed.channels, categories, catId);
+          setChannels(visible);
+          parsed.channels.forEach((c: LiveChannel) => {
+            channelMasterCache.current[String(c.id || c.code)] = c;
+          });
+          setIsLoadingChannels(false);
+          if (onChannelsLoaded) onChannelsLoaded(visible);
+          return;
+        }
+      }
+    } catch (e) {}
+
+    // 3. Fallback to API if not cached yet
+    setIsLoadingChannels(true);
+    if (window.MagisClient && typeof window.MagisClient.getLiveChannels === 'function') {
+      window.MagisClient.getLiveChannels(catId, 1, 50, (err: any, list: any[]) => {
+        if (!err && Array.isArray(list) && list.length) {
+          const chs: LiveChannel[] = list.map((c, idx) => ({
+            id: c.channelCode || c.id || idx,
+            name: c.name || c.channelName || 'Canal',
+            code: c.channelCode || String(c.id || ''),
+            url: c.streamUrl || '',
+            logo: c.logo || c.channelLogo || '',
+            now: c.now || c.currentProgram || 'Transmisión en directo',
+            next: c.next || c.nextProgram || 'Continuación de programación',
+            time: c.time || 'EN VIVO',
+            isFav: !!favMap[String(c.channelCode || c.id)]
+          }));
+          chs.forEach(c => {
+            channelMasterCache.current[String(c.id || c.code)] = c;
+          });
+          categoryChannelsCache.set(catId, chs);
+          const visible = filterLockedChannels(chs, categories, catId);
+          setChannels(visible);
+          try {
+            localStorage.setItem('xuper_live_ch_cache_v2_' + catId, JSON.stringify({ at: Date.now(), channels: chs }));
+          } catch (e) {}
+          if (onChannelsLoaded) onChannelsLoaded(visible);
+        } else {
+          // Fallback to local mock channels (essential for desktop browser development / offline)
+          const fallbackList = getMockChannelsForCategory(catId);
+          setChannels(fallbackList);
+          if (onChannelsLoaded) onChannelsLoaded(fallbackList);
+        }
+        setIsLoadingChannels(false);
+      });
+    } else {
+      const fallbackList = getMockChannelsForCategory(catId);
+      setChannels(fallbackList);
+      if (onChannelsLoaded) onChannelsLoaded(fallbackList);
+      setIsLoadingChannels(false);
+    }
+  }, [activeCategory, favMap, categories, lockTick]);
+
+  // When channels change or load, ensure an active channel is ALWAYS selected!
+  useEffect(() => {
+    if (channels.length > 0) {
+      const isAnyTuned = tunedChannel && channels.some(c => 
+        String(c.id) === String(tunedChannel.id) ||
+        (c.code && tunedChannel.code && String(c.code) === String(tunedChannel.code)) ||
+        (c.name && tunedChannel.name && c.name.trim().toLowerCase() === tunedChannel.name.trim().toLowerCase())
+      );
+      if (!isAnyTuned) {
+        // Try restoring last saved channel from localStorage first
+        try {
+          const raw = localStorage.getItem('xuper_last_live_ch');
+          if (raw) {
+            const saved = JSON.parse(raw);
+            const foundInCat = channels.find(c => 
+              String(c.id) === String(saved.id) ||
+              (c.code && saved.code && String(c.code) === String(saved.code)) ||
+              (c.name && saved.name && c.name.trim().toLowerCase() === saved.name.trim().toLowerCase())
+            );
+            if (foundInCat) {
+              onTuneChannel(foundInCat);
+              return;
+            }
+          }
+        } catch {}
+        // Fallback: tune the first channel of this category so one channel is ALWAYS active!
+        onTuneChannel(channels[0]);
+      }
+    }
+  }, [channels]);
+
+  // ZERO-FLICKER: Stream playback depends ONLY on tunedChannel!
+  // Navigating up/down in the channel list does NOT interrupt or restart the stream!
+  useEffect(() => {
+    if (isActiveTab && tunedChannel && previewVideoRef.current) {
+      playerService.playLivePreview(tunedChannel, previewVideoRef.current);
+    } else if (!isActiveTab) {
+      playerService.stop();
+    }
+  }, [isActiveTab, tunedChannel]);
+
+  // ZERO-FLICKER: Toggle AVPlay fullscreen / preview display rectangle dynamically!
+  useEffect(() => {
+    playerService.setFullscreen(isFullscreen);
+  }, [isFullscreen]);
+
+  // Stop playback only when unmounting the whole Live TV view (e.g. closing app)
+  useEffect(() => {
+    return () => {
+      playerService.stop();
+    };
+  }, []);
+
+  // Dynamic Live Progress percentage based on the current hour (e.g., 20:15 -> 25%)
+  const liveProgPercent = useMemo(() => {
+    const mins = new Date().getMinutes();
+    const cycle = (mins % 60) / 60;
+    return Math.max(12, Math.min(94, Math.round(cycle * 100)));
+  }, [liveClock]);
+
+  const liveStartTime = useMemo(() => {
+    const d = new Date();
+    const h = d.getHours();
+    const h12 = h % 12 || 12;
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    return `${h12}:00 ${ampm}`;
+  }, [liveClock]);
+
+  const liveEndTime = useMemo(() => {
+    const d = new Date();
+    const h = (d.getHours() + 1) % 24;
+    const h12 = h % 12 || 12;
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    return `${h12}:00 ${ampm}`;
+  }, [liveClock]);
+
+  // Which channel is currently under cursor vs which channel is tuned/playing
+  const focusedChannel = channels[focus.channelIndex] || tunedChannel || channels[0] || null;
+  // The info panel always describes the channel that is playing in the preview
+  const displayChannel = tunedChannel || focusedChannel;
+  const isFocusedChannelTuned = !!(
+    tunedChannel && focusedChannel && (
+      String(tunedChannel.id) === String(focusedChannel.id) ||
+      (tunedChannel.code && focusedChannel.code && String(tunedChannel.code) === String(focusedChannel.code)) ||
+      (tunedChannel.name && focusedChannel.name && tunedChannel.name.trim().toLowerCase() === focusedChannel.name.trim().toLowerCase())
+    )
+  );
+  const isDisplayChannelTuned = !!(
+    tunedChannel && displayChannel && (
+      String(tunedChannel.id) === String(displayChannel.id) ||
+      (tunedChannel.code && displayChannel.code && String(tunedChannel.code) === String(displayChannel.code)) ||
+      (tunedChannel.name && displayChannel.name && tunedChannel.name.trim().toLowerCase() === displayChannel.name.trim().toLowerCase())
+    )
+  );
+  const isDisplayChannelFav = !!(displayChannel && favMap[String(displayChannel.id || displayChannel.code)]);
+
+  return (
+    <div className={`live-tv-view-2col ${isFullscreen ? 'is-fullscreen' : ''}`}>
+      {/* =========================================================
+          COLUMNA 1: Categorías Verticales (260px)
+          ========================================================= */}
+      <aside className="live-col-categories">
+        <div className="live-col-header">
+          <span className="live-header-title">CATEGORÍAS</span>
+          <span className="live-header-count">{categories.length}</span>
+        </div>
+
+        <div className="live-cat-vlist" ref={catListRef}>
+          {categories.map((cat, idx) => {
+            const isCurrentActive = selectedCatIndex === idx;
+            const isCursor = isFocusActive && focus.area === 'cats' && focus.catIndex === idx;
+
+            return (
+              <div
+                key={cat.id || idx}
+                className={`live-cat-vrow ${isCurrentActive ? 'is-active-cat' : ''} ${isCursor ? 'is-focused' : ''}`}
+                onClick={() => {
+                  if (onSelectCategory) {
+                    onSelectCategory(idx);
+                  }
+                }}
+              >
+                <span className="live-cat-vname">{cat.name}</span>
+              </div>
+            );
+          })}
+        </div>
+      </aside>
+
+      {/* =========================================================
+          COLUMNA 2: Lista de Canales (460px)
+          ========================================================= */}
+      <section className="live-col-channels">
+        <div className="live-col-header">
+          <span className="live-header-title">{activeCategory.name.toUpperCase()}</span>
+          <span className="live-header-count">{channels.length} canales</span>
+        </div>
+
+        <div className="live-channel-vlist" ref={channelListRef}>
+          {channels.length === 0 && isLoadingChannels ? (
+            <div className="live-loading-msg">Cargando canales...</div>
+          ) : channels.length === 0 ? (
+            <div className="live-empty-msg">
+              {activeCategory.isFav
+                ? 'Aún no tienes canales en ★ Favoritos.\nSintoniza un canal y presiona Añadir a Favoritos.'
+                : 'No hay canales disponibles en esta categoría'}
+            </div>
+          ) : (
+            channels.map((ch, idx) => {
+              const isCursorFocused = isFocusActive && focus.area === 'channels' && focus.channelIndex === idx;
+              const isChannelTuned = !!(
+                tunedChannel && (
+                  String(tunedChannel.id) === String(ch.id) ||
+                  (tunedChannel.code && ch.code && String(tunedChannel.code) === String(ch.code)) ||
+                  (tunedChannel.name && ch.name && tunedChannel.name.trim().toLowerCase() === ch.name.trim().toLowerCase())
+                )
+              );
+              const isCurFav = !!favMap[String(ch.id || ch.code)];
+              const initials = String(ch.name || 'TV').trim().slice(0, 2).toUpperCase();
+
+              return (
+                <div
+                  key={ch.id || idx}
+                  className={`live-channel-card ${isCursorFocused ? 'is-focused' : ''} ${isChannelTuned ? 'is-active-channel' : ''}`}
+                  onClick={() => {
+                    if (isChannelTuned) {
+                      onEnterFullscreen(ch);
+                    } else {
+                      onTuneChannel(ch);
+                    }
+                  }}
+                >
+                  <div className="live-ch-num">{idx + 1 < 10 ? `0${idx + 1}` : idx + 1}</div>
+                  {ch.logo ? (
+                    <img
+                      className="live-ch-logo"
+                      src={ch.logo}
+                      alt={ch.name}
+                      onError={(e) => {
+                        (e.target as HTMLElement).style.display = 'none';
+                        const fallback = (e.target as HTMLElement).nextElementSibling as HTMLElement;
+                        if (fallback) fallback.style.display = 'flex';
+                      }}
+                    />
+                  ) : null}
+                  <div className="live-ch-avatar" style={{ display: ch.logo ? 'none' : 'flex' }}>
+                    {initials}
+                  </div>
+                  <div className="live-ch-info">
+                    <div className="live-ch-title">
+                      <span>{ch.name}</span>
+                      {isChannelTuned && <span className="live-playing-badge">▶ EN VIVO</span>}
+                      {isCurFav && <span className="live-fav-icon">★</span>}
+                    </div>
+                    <div className="live-ch-now">{ch.now || 'Transmisión en directo'}</div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </section>
+
+      {/* =========================================================
+          ZONA 3: Gran Preview 16:9 + Zero-Flicker Fullscreen Player Surface
+          ========================================================= */}
+      <main className="live-col-preview">
+        {/* Persistent Single Video Box (Seamless 16:9 Preview <-> Fullscreen) */}
+        <div
+          className={`live-grand-preview-box ${isFullscreen ? 'is-fullscreen' : ''} ${
+            !isFullscreen && isFocusActive && focus.area === 'preview_btns' && focus.btnIndex === 0 ? 'is-focused' : ''
+          }`}
+          onClick={() => {
+            if (!isFullscreen && (tunedChannel || displayChannel)) {
+              onEnterFullscreen(tunedChannel || displayChannel);
+            }
+          }}
+          style={{ cursor: isFullscreen ? 'default' : 'pointer' }}
+          title={!isFullscreen ? 'Clic para expandir a pantalla completa' : undefined}
+        >
+          <video
+            ref={previewVideoRef}
+            id="live-preview-video"
+            className="live-preview-video"
+            playsInline
+            autoPlay
+          />
+          <div className="live-preview-overlay" />
+          
+          <div className="live-preview-top-tags">
+            <span className="live-stream-badge">
+              <span className="live-pulse-dot" /> EN VIVO
+            </span>
+            <span className="live-quality-tag">FHD 1080p</span>
+            {tunedChannel && (
+              <span className="live-quality-tag" style={{ background: 'rgba(0, 229, 255, 0.25)', borderColor: '#00e5ff' }}>
+                {tunedChannel.name}
+              </span>
+            )}
+          </div>
+
+          {!isFullscreen && (
+            <div
+              className="live-preview-expand-hint"
+              title="Pantalla completa"
+              aria-label="Pantalla completa"
+              onClick={() => { if (displayChannel) onEnterFullscreen(displayChannel); }}
+            >
+              <span className="live-expand-icon">⛶</span>
+            </div>
+          )}
+
+          {/* =========================================================
+              FULLSCREEN: Authentic InfoBar OSD (Vanilla Layout)
+              ========================================================= */}
+          {isFullscreen && displayChannel && (
+            <div className={`player-infobar ${showOsd && !showChannelsDrawer ? 'is-active' : ''}`}>
+              {displayChannel.logo ? (
+                <img
+                  className="pi-logo"
+                  src={displayChannel.logo}
+                  alt=""
+                  onError={(e) => {
+                    (e.target as HTMLElement).style.display = 'none';
+                    const fallback = (e.target as HTMLElement).nextElementSibling as HTMLElement;
+                    if (fallback) fallback.style.display = 'flex';
+                  }}
+                />
+              ) : null}
+              <div className="pi-avatar" style={{ display: displayChannel.logo ? 'none' : 'flex' }}>
+                {String(displayChannel.name || 'TV').trim().slice(0, 2).toUpperCase()}
+              </div>
+
+              <div className="pi-namerow">
+                <span className="pi-name">{displayChannel.name}</span>
+              </div>
+
+              <div className="pi-btn-group">
+                <button
+                  className={`pi-action-btn ${fullscreenFocusBtn === 'channels' ? 'is-focused' : ''}`}
+                  onClick={onToggleChannelsDrawer}
+                >
+                  ☰ Lista de canales
+                </button>
+                <button
+                  className={`pi-action-btn pi-icon-only fav-btn ${isDisplayChannelFav ? 'is-fav' : ''} ${fullscreenFocusBtn === 'fav' ? 'is-focused' : ''}`}
+                  title={isDisplayChannelFav ? 'Quitar de favoritos' : 'Añadir a favoritos'}
+                  aria-label={isDisplayChannelFav ? 'Quitar de favoritos' : 'Añadir a favoritos'}
+                  onClick={() => onToggleFavorite(displayChannel)}
+                >
+                  {isDisplayChannelFav ? '★' : '☆'}
+                </button>
+              </div>
+
+              <div className="pi-date">{liveClock}</div>
+              <div className="pi-div-line" />
+              <div className="pi-now">
+                {displayChannel.now && !/^en vivo$/i.test(displayChannel.now.trim()) ? displayChannel.now : ''}
+              </div>
+              <div className="pi-next">{displayChannel.next ? `Siguiente: ${displayChannel.next}` : 'Continuación de programación'}</div>
+              <div className="pi-range">{displayChannel.time || 'EN VIVO'}</div>
+
+              <div className="pi-seek">
+                <div className="bar" />
+              </div>
+
+              <div className="pi-hint-row">
+                <div>
+                  <span className="hint-badge">▲ / ▼</span> Canal
+                  <span className="hint-badge" style={{ marginLeft: 16 }}>◄ / ►</span> Lista de canales
+                  <span className="hint-badge" style={{ marginLeft: 16 }}>OK</span> OSD Info
+                </div>
+                <div>
+                  <span className="hint-badge">BACK</span> Salir de pantalla completa
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* =========================================================
+              FULLSCREEN: Authentic Floating Channel Drawer (Vanilla Layout)
+              ========================================================= */}
+          {isFullscreen && (
+            <div className={`player-channels ${showChannelsDrawer ? 'is-active' : ''}`}>
+              <div className="pc-head">
+                <div>
+                  <div className="pc-title">{drawerSearching ? 'RESULTADOS' : activeCategory.name.toUpperCase()}</div>
+                  <div className="pc-counter">{drawerChannels.length} canales</div>
+                </div>
+                {drawerArea !== 'search' && !drawerSearching && (
+                  <div
+                    className={`pc-search-btn ${drawerArea === 'searchbtn' ? 'is-focused' : ''}`}
+                    title="Buscar canal"
+                    aria-label="Buscar canal"
+                  >
+                    ⌕
+                  </div>
+                )}
+              </div>
+              <div className="pc-div" />
+
+              {(drawerArea === 'search' || drawerSearching) && (
+                <div className={`pc-search ${drawerArea === 'search' ? 'is-focused' : ''}`}>
+                  <span className="pc-search-icon">⌕</span>
+                  <div className={`pc-search-text ${drawerQuery ? '' : 'is-empty'}`}>
+                    {drawerQuery || 'Buscar canal en todas las categorías…'}
+                    {drawerArea === 'search' && <span className="pc-search-caret" />}
+                  </div>
+                </div>
+              )}
+
+              <div className="pc-body">
+              {drawerArea === 'search' ? (
+                <div className="pc-cats pc-keyboard-col">
+                  <OnScreenKeyboard state={drawerKb} focused />
+                </div>
+              ) : (
+              <div className={`pc-cats ${drawerArea === 'cats' ? 'is-active-col' : ''}`} ref={drawerCatsRef}>
+                {categories.map((cat, idx) => (
+                  <div
+                    key={String(cat.id) + idx}
+                    className={`pc-cat ${idx === selectedCatIndex ? 'is-current' : ''} ${
+                      drawerArea === 'cats' && idx === drawerCatIndex ? 'is-focused' : ''
+                    }`}
+                  >
+                    <span className="pc-cat-name">{cat.name}</span>
+                    {!cat.isFav && parentalService.isLiveCatLocked(cat.id) && <span className="pc-cat-lock">🔒</span>}
+                  </div>
+                ))}
+              </div>
+              )}
+
+              <div className="pc-list" ref={drawerListRef}>
+                {drawerChannels.length === 0 ? (
+                  <div className="pc-empty-msg">
+                    {drawerSearching ? `Sin resultados para "${drawerQuery.trim()}"` : activeCategory.isFav
+                      ? 'Aún no tienes canales en ★ Favoritos.\nEn el reproductor usa el botón ☆ Favorito para guardarlos.'
+                      : 'No hay canales disponibles en esta categoría'}
+                  </div>
+                ) : (
+                  drawerChannels.map((ch, idx) => {
+                    const isChTuned = tunedChannel?.id === ch.id;
+                    const isCursor = drawerArea === 'channels' && drawerFocusIndex === idx;
+                    const isFav = !!favMap[String(ch.id || ch.code)];
+                    const initials = String(ch.name || 'TV').trim().slice(0, 2).toUpperCase();
+
+                    return (
+                      <div
+                        key={ch.id || idx}
+                        className={`pc-row ${isChTuned ? 'is-current' : ''} ${isCursor ? 'is-focused' : ''}`}
+                        onClick={() => {
+                          onTuneChannel(ch);
+                          onToggleChannelsDrawer();
+                          onToggleOsd();
+                        }}
+                      >
+                        {ch.logo ? (
+                          <img
+                            className="ic"
+                            src={ch.logo}
+                            alt=""
+                            onError={(e) => {
+                              (e.target as HTMLElement).style.display = 'none';
+                              const fallback = (e.target as HTMLElement).nextElementSibling as HTMLElement;
+                              if (fallback) fallback.style.display = 'flex';
+                            }}
+                          />
+                        ) : null}
+                        <div className="pc-avatar" style={{ display: ch.logo ? 'none' : 'flex' }}>
+                          {initials}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div className="nm">
+                            {ch.name} {isFav && <span style={{ color: '#FFD60A', marginLeft: 8 }}>★</span>}
+                          </div>
+                          <div className="epg">{ch.now || 'Transmisión en directo'}</div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+              </div>
+
+              <div className="pc-menu">
+                <span style={{ color: '#94a3b8', fontSize: 16 }}>
+                  <b style={{ color: '#00e5ff' }}>▲▼</b> Navegar &nbsp;&nbsp;|&nbsp;&nbsp; 
+                  <b style={{ color: '#00e5ff' }}>◄►</b> Categorías / Canales &nbsp;&nbsp;|&nbsp;&nbsp; 
+                  <b style={{ color: '#00e5ff' }}>OK</b> {drawerArea === 'cats' ? 'Abrir' : 'Sintonizar'} &nbsp;&nbsp;|&nbsp;&nbsp; 
+                  <b style={{ color: '#00e5ff' }}>BACK</b> Cerrar
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Super EPG Showcase Card (Visible in Preview Mode) */}
+        {!isFullscreen && (
+          <div className="live-super-epg-card">
+            {displayChannel ? (
+              <>
+                <div className="epg-main-info">
+                  <div className="epg-badge-row">
+                    <span className={`epg-signal-tag ${isDisplayChannelTuned ? 'is-playing' : 'is-preview'}`}>
+                      {isDisplayChannelTuned ? '● EN REPRODUCCIÓN' : '○ SELECCIONADO (PRESIONA OK PARA SINTONIZAR)'}
+                    </span>
+                    {hasClockTime(displayChannel.time) && (
+                      <span className="epg-time-badge">{displayChannel.time}</span>
+                    )}
+                    <div className="epg-top-right">
+                      <button
+                        className={`epg-fav-icon ${
+                          isFocusActive && focus.area === 'preview_btns' && focus.btnIndex === 1 ? 'is-focused' : ''
+                        } ${isDisplayChannelFav ? 'is-favorite' : ''}`}
+                        title={isDisplayChannelFav ? 'Quitar de favoritos' : 'Añadir a favoritos'}
+                        aria-label={isDisplayChannelFav ? 'Quitar de favoritos' : 'Añadir a favoritos'}
+                        onClick={() => onToggleFavorite(displayChannel)}
+                      >
+                        {isDisplayChannelFav ? '★' : '☆'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="epg-channel-header-row">
+                    {displayChannel.logo ? (
+                      <img
+                        className="epg-channel-logo"
+                        src={displayChannel.logo}
+                        alt=""
+                        onError={(e) => {
+                          (e.target as HTMLElement).style.display = 'none';
+                          const fallback = (e.target as HTMLElement).nextElementSibling as HTMLElement;
+                          if (fallback) fallback.style.display = 'flex';
+                        }}
+                      />
+                    ) : null}
+                    <div className="epg-channel-avatar" style={{ display: displayChannel.logo ? 'none' : 'flex' }}>
+                      {String(displayChannel.name || 'TV').trim().slice(0, 2).toUpperCase()}
+                    </div>
+                    <div className="epg-channel-text">
+                      <h2 className="epg-channel-title">{displayChannel.name}</h2>
+                      {displayChannel.now && !/^en vivo$/i.test(displayChannel.now.trim()) && (
+                        <div className="epg-program-name">{displayChannel.now}</div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Sleek Live Progress Bar matching Fullscreen InfoBar */}
+                  <div className="epg-progress-container">
+                    <div className="epg-progress-labels">
+                      <span className="epg-prog-time">
+                        {hasClockTime(displayChannel.time) ? displayChannel.time!.split('-')[0].trim() : liveStartTime}
+                      </span>
+                      <span className="epg-prog-time">
+                        {hasClockTime(displayChannel.time) && displayChannel.time!.split('-')[1]
+                          ? displayChannel.time!.split('-')[1].trim()
+                          : liveEndTime}
+                      </span>
+                    </div>
+                    <div className="epg-progress-track">
+                      <div className="epg-progress-fill" style={{ width: `${liveProgPercent}%` }} />
+                    </div>
+                  </div>
+
+                  <p className="epg-synopsis-text">
+                    Transmisión digital oficial en alta definición. Disfruta de la mejor cobertura en vivo, programación continuada y señales exclusivas en Xuper TV.
+                  </p>
+
+                  <div className="epg-upcoming-row">
+                    <span className="epg-upcoming-label">A CONTINUACIÓN:</span>
+                    <span className="epg-upcoming-title">{displayChannel.next || 'Continuación de programación nocturna'}</span>
+                  </div>
+                </div>
+
+              </>
+            ) : (
+              <div className="epg-main-info" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', minHeight: 180, textAlign: 'center', color: '#94a3b8' }}>
+                <div style={{ fontSize: 24, fontWeight: 700, color: '#f1f5f9', marginBottom: 8 }}>
+                  No hay canal seleccionado
+                </div>
+                <div style={{ fontSize: 16 }}>
+                  {activeCategory.isFav ? 'Añade tus canales favoritos para verlos aquí' : 'Selecciona una categoría con canales disponibles'}
+                </div>
+              </div>
+            )}
+
+            <div className="epg-footer-shortcuts">
+              <span><b>OK</b> {focus.area === 'channels' && !isFocusedChannelTuned ? 'Sintonizar canal' : 'Pantalla completa'}</span>
+              <span><b>▲ ▼</b> Navegar canales</span>
+              <span><b>◄ ►</b> Columnas y botones</span>
+            </div>
+          </div>
+        )}
+      </main>
+    </div>
+  );
+};

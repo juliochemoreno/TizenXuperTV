@@ -1,0 +1,70 @@
+import React from 'react';
+import { HistoryItem } from '../../types/history';
+
+interface ContinueWatchingCardProps {
+  item: HistoryItem;
+  isFocused: boolean;
+  onActivate: (item: HistoryItem) => void;
+}
+
+const ContinueWatchingCardComponent: React.FC<ContinueWatchingCardProps> = ({
+  item,
+  isFocused,
+  onActivate
+}) => {
+  const posterUrl = item.poster || 'assets/placeholder_landscape.png';
+  const pct = item.duration > 0
+    ? Math.min(100, Math.max(5, Math.round((item.position / item.duration) * 100)))
+    : 45;
+
+  const remainingMin = item.duration > item.position
+    ? Math.max(1, Math.round((item.duration - item.position) / 60))
+    : 38;
+
+  const episodeBadge = item.series && item.episodeNumber
+    ? `T1:E${item.episodeNumber}`
+    : 'Continuar';
+
+  const infoText = `${episodeBadge} · ${remainingMin} min restantes`;
+
+  return (
+    <div
+      className={`cw-card apple-cw-card ${isFocused ? 'is-focused' : ''}`}
+      onClick={() => onActivate(item)}
+    >
+      <div
+        className="cw-card-img"
+        style={{ backgroundImage: `url('${posterUrl}')` }}
+      >
+        <div className="poster-brand-badge">
+          <span>tv</span>
+        </div>
+        <div className="cw-bottom-gradient">
+          <div className="cw-title-row">{item.title || 'Contenido'}</div>
+          <div className="cw-footer-row">
+            <div className="cw-footer-left">
+              <span className="cw-mini-play">▶</span>
+              <span className="cw-info-text">{infoText}</span>
+            </div>
+            <div className="cw-more-dots">···</div>
+          </div>
+          <div className="cw-progress-track">
+            <div className="cw-progress-fill" style={{ width: `${pct}%` }} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export const ContinueWatchingCard = React.memo<ContinueWatchingCardProps>(
+  ContinueWatchingCardComponent,
+  (prev, next) => {
+    return (
+      prev.isFocused === next.isFocused &&
+      prev.item.id === next.item.id &&
+      prev.item.position === next.item.position &&
+      prev.item.duration === next.item.duration
+    );
+  }
+);

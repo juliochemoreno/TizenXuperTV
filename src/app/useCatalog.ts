@@ -1,0 +1,65 @@
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { catalogService } from '../services/catalogService';
+import { historyService } from '../services/historyService';
+import { VodItem } from '../types/vod';
+import { HistoryItem } from '../types/history';
+
+type Catalog = Awaited<ReturnType<typeof catalogService.fetchCatalog>>;
+
+/** VOD catalog lists and watch history; `onLoaded` runs once when the catalog arrives */
+export function useCatalog(onLoaded?: (catalog: Catalog) => void) {
+  const [featuredItems, setFeaturedItems] = useState<VodItem[]>([]);
+  const [movieItems, setMovieItems] = useState<VodItem[]>([]);
+  const [seriesItems, setSeriesItems] = useState<VodItem[]>([]);
+  const [kidsItems, setKidsItems] = useState<VodItem[]>([]);
+  const [animeItems, setAnimeItems] = useState<VodItem[]>([]);
+  const [catalogRows, setCatalogRows] = useState<Record<string, VodItem[]>>({});
+  const [historyItems, setHistoryItems] = useState<HistoryItem[]>([]);
+
+  const onLoadedRef = useRef(onLoaded);
+  onLoadedRef.current = onLoaded;
+
+  useEffect(() => {
+    setHistoryItems(historyService.getHistory());
+    const unsubHist = historyService.subscribe(() => {
+      setHistoryItems(historyService.getHistory());
+    });
+
+    catalogService.fetchCatalog().then(catalog => {
+      setFeaturedItems(catalog.featured || []);
+      setMovieItems(catalog.movies || []);
+      setSeriesItems(catalog.series || []);
+      setKidsItems(catalog.kids || []);
+      setAnimeItems(catalog.anime || []);
+      setCatalogRows(catalog.rowsByGroup || {});
+      if (onLoadedRef.current) onLoadedRef.current(catalog);
+    });
+
+    return () => {
+      unsubHist();
+    };
+  }, []);
+
+  /** Catalog item for a history entry (falls back to the data stored in the history) */
+  const findVod = useCallback((h: HistoryItem): VodItem => {
+    return (movieItems.find(m => m.id === h.id) ||
+            seriesItems.find(s => s.id === h.id) ||
+            featuredItems.find(f => f.id === h.id) || {
+              id: h.id,
+              title: h.title,
+              poster: h.poster,
+              isSeries: Boolean(h.series)
+            }) as VodItem;
+  }, [movieItems, seriesItems, featuredItems]);
+
+  return {
+    featuredItems,
+    movieItems,
+    seriesItems,
+    kidsItems,
+    animeItems,
+    catalogRows,
+    historyItems,
+    findVod
+  };
+}

@@ -1,0 +1,20 @@
+export interface LiveChannel {
+  id: string | number;
+  name: string;
+  code?: string;
+  url?: string;
+  logo?: string;
+  now?: string;
+  next?: string;
+  time?: string;
+  isFav?: boolean;
+  colId?: string | number;
+  categoryName?: string;
+}
+
+export interface LiveCategory {
+  id: string | number;
+  name: string;
+  isFav?: boolean;
+  isM3u?: boolean;
+}

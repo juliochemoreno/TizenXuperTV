@@ -1,0 +1,164 @@
+import { TvKey } from '../../hooks/useTvRemote';
+import { DEFAULT_LIVE_CATEGORIES } from '../../views/LiveTvView';
+import { LiveTvState } from '../useLiveTv';
+
+export type LiveTvKeysCtx = LiveTvState & {
+  guardLiveCat: (catIndex: number, apply: () => void) => void;
+  returnToHeader: () => void;
+};
+
+export function handleLiveTvKeys(key: TvKey, ctx: LiveTvKeysCtx): boolean {
+  const {
+    liveTvFocus,
+    setLiveTvFocus,
+    liveCategoriesRef,
+    liveChannelsRef,
+    tunedLiveChannel,
+    setTunedLiveChannel,
+    setIsFullscreenLive,
+    triggerOsd,
+    toggleLiveFavorite,
+    guardLiveCat,
+    returnToHeader
+  } = ctx;
+  if (liveTvFocus.area === 'cats') {
+    const totalCats = liveCategoriesRef.current.length || DEFAULT_LIVE_CATEGORIES.length;
+    if (key === 'up') {
+      setLiveTvFocus(prev => ({
+        ...prev,
+        catIndex: (prev.catIndex - 1 + totalCats) % totalCats
+      }));
+      return true;
+    }
+    if (key === 'down') {
+      setLiveTvFocus(prev => ({
+        ...prev,
+        catIndex: (prev.catIndex + 1) % totalCats
+      }));
+      return true;
+    }
+    if (key === 'enter') {
+      // Activate category without jumping into channels (PIN-guarded)
+      const catIdx = liveTvFocus.catIndex;
+      guardLiveCat(catIdx, () => {
+        setLiveTvFocus(prev => ({
+          ...prev,
+          catIndex: catIdx,
+          selectedCatIndex: catIdx,
+          channelIndex: 0
+        }));
+      });
+      return true;
+    }
+    if (key === 'right') {
+      // Activate category AND move into Channels column (PIN-guarded)
+      const catIdx = liveTvFocus.catIndex;
+      guardLiveCat(catIdx, () => {
+        setLiveTvFocus(prev => ({
+          ...prev,
+          catIndex: catIdx,
+          selectedCatIndex: catIdx,
+          area: 'channels',
+          channelIndex: 0
+        }));
+      });
+      return true;
+    }
+    if (key === 'left') {
+      returnToHeader();
+      return true;
+    }
+  }
+
+  if (liveTvFocus.area === 'channels') {
+    const totalChs = liveChannelsRef.current.length;
+    if (key === 'up') {
+      if (totalChs > 0) {
+        setLiveTvFocus(prev => ({
+          ...prev,
+          channelIndex: (prev.channelIndex - 1 + totalChs) % totalChs
+        }));
+      }
+      return true;
+    }
+    if (key === 'down') {
+      if (totalChs > 0) {
+        setLiveTvFocus(prev => ({
+          ...prev,
+          channelIndex: (prev.channelIndex + 1) % totalChs
+        }));
+      }
+      return true;
+    }
+    if (key === 'left') {
+      // Move back to Categories column, landing cursor right on the active category
+      setLiveTvFocus(prev => ({
+        ...prev,
+        area: 'cats',
+        catIndex: prev.selectedCatIndex ?? 0
+      }));
+      return true;
+    }
+    if (key === 'right') {
+      // Move to Preview Action Buttons (Pantalla completa / Favorito)
+      setLiveTvFocus(prev => ({ ...prev, area: 'preview_btns', btnIndex: 0 }));
+      return true;
+    }
+    if (key === 'enter') {
+      // OK / Enter pressed on a channel:
+      const focusedChannel = liveChannelsRef.current[liveTvFocus.channelIndex];
+      if (focusedChannel) {
+        if (tunedLiveChannel && tunedLiveChannel.id === focusedChannel.id) {
+          // Channel is already playing -> Go fullscreen!
+          setIsFullscreenLive(true);
+          triggerOsd();
+        } else {
+          // Different channel -> Tune it!
+          setTunedLiveChannel(focusedChannel);
+        }
+      }
+      return true;
+    }
+  }
+
+  if (liveTvFocus.area === 'preview_btns') {
+    // btnIndex 0 = Pantalla completa (inside the preview), 1 = Favorito (below it)
+    if (key === 'up') {
+      if (liveTvFocus.btnIndex === 1) {
+        setLiveTvFocus(prev => ({ ...prev, btnIndex: 0 }));
+      } else {
+        returnToHeader();
+      }
+      return true;
+    }
+    if (key === 'down') {
+      if (liveTvFocus.btnIndex === 0) {
+        setLiveTvFocus(prev => ({ ...prev, btnIndex: 1 }));
+      }
+      return true;
+    }
+    if (key === 'left') {
+      // Move back to Channels column
+      setLiveTvFocus(prev => ({ ...prev, area: 'channels' }));
+      return true;
+    }
+    if (key === 'right') {
+      return true;
+    }
+    if (key === 'enter') {
+      if (liveTvFocus.btnIndex === 0) {
+        // Pantalla completa
+        setIsFullscreenLive(true);
+        triggerOsd();
+      } else if (liveTvFocus.btnIndex === 1) {
+        // Favorito
+        if (tunedLiveChannel) {
+          toggleLiveFavorite(tunedLiveChannel);
+        }
+      }
+      return true;
+    }
+  }
+
+  return true;
+}
