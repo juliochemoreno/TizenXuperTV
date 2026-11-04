@@ -57,7 +57,8 @@ export function handleHeaderKeys(key: TvKey, ctx: HeaderKeysCtx): boolean {
     if (selectedTab === 'tv') {
       setLiveTvFocus(prev => ({ ...prev, area: 'channels', channelIndex: 0 }));
     } else {
-      setDestacadosFocus(prev => ({ ...prev, area: 'hero', heroBtn: 'play' }));
+      // Go back to the row the user left (remembered per tab), or the hero on a fresh tab
+      setDestacadosFocus(prev => (prev.area === 'row' ? prev : { ...prev, area: 'hero', heroBtn: 'play' }));
     }
     return true;
   }

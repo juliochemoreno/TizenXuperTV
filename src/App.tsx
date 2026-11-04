@@ -183,9 +183,29 @@ export const App: React.FC = () => {
     return currentRows[rowIdx] ? currentRows[rowIdx].items.length : 0;
   }, [currentRows]);
 
-  // Reset hero index when tab changes
+  // Each VOD tab remembers its focus, hero slide and scroll; a new tab starts at the top
+  const tabMemoryRef = useRef<Partial<Record<TabId, { focus: DestacadosFocus; hero: number; scrollTop: number }>>>({});
+  const prevTabRef = useRef<TabId>(selectedTab);
   useEffect(() => {
-    setActiveHeroIndex(0);
+    const prev = prevTabRef.current;
+    if (prev === selectedTab) return;
+    prevTabRef.current = selectedTab;
+
+    const container = document.querySelector('.page-container') as HTMLElement | null;
+    if (prev !== 'tv') {
+      tabMemoryRef.current[prev] = {
+        focus: destacadosFocus,
+        hero: activeHeroIndex,
+        scrollTop: container ? container.scrollTop : 0
+      };
+    }
+    const saved = tabMemoryRef.current[selectedTab];
+    setDestacadosFocus(saved ? saved.focus : { area: 'hero', heroBtn: 'play', rowIndex: 0, cardIndex: 0 });
+    setActiveHeroIndex(saved ? saved.hero : 0);
+    requestAnimationFrame(() => {
+      const c = document.querySelector('.page-container') as HTMLElement | null;
+      if (c) c.scrollTop = saved ? saved.scrollTop : 0;
+    });
   }, [selectedTab]);
 
   const openProfile = useCallback(() => {
@@ -348,7 +368,12 @@ export const App: React.FC = () => {
       </div>
 
       {/* View: VOD TABS (Destacados, Películas, Series, Kids, Anime, Historial) */}
-      {selectedTab !== 'tv' && !activeDetailItem && !activeVodPlayer && (
+      {/* Stays mounted under the detail / player (hidden) so Back returns to the same row, card and scroll */}
+      {selectedTab !== 'tv' && (
+        <div
+          className="tab-pane-vod"
+          style={{ display: 'contents', visibility: activeDetailItem || activeVodPlayer ? 'hidden' : 'visible' }}
+        >
         <DestacadosView
           heroItems={currentHeroItems}
           activeHeroIndex={activeHeroIndex}
@@ -368,6 +393,7 @@ export const App: React.FC = () => {
           }}
           onActivateVod={it => handleOpenDetail(it)}
         />
+        </div>
       )}
 
       {/* View: VOD DETAIL MODAL / SCREEN (Cinema Dark / Apple TV+) */}
