@@ -4,6 +4,7 @@ import { LiveChannel, LiveCategory } from '../types/channel';
 import { MOCK_CHANNELS_BY_CATEGORY } from '../services/mockLiveChannels';
 import { KbState, KB_INITIAL } from '../components/live/OnScreenKeyboard';
 import { DrawerArea, LiveLocation } from './types';
+import { channelKey, cleanFavMap } from '../lib/channelKey';
 
 /** Live TV state: categories, channels, tuned channel, favorites and the fullscreen player/drawer */
 export function useLiveTv() {
@@ -53,7 +54,7 @@ export function useLiveTv() {
   const [liveFavMap, setLiveFavMap] = useState<Record<string, boolean>>(() => {
     try {
       const raw = localStorage.getItem('xuper_live_favs_v1');
-      return raw ? JSON.parse(raw) : {};
+      return raw ? cleanFavMap(JSON.parse(raw)) : {};
     } catch {
       return {};
     }
@@ -97,7 +98,8 @@ export function useLiveTv() {
 
   // Toggle Live Favorite
   const toggleLiveFavorite = useCallback((channel: LiveChannel) => {
-    const key = String(channel.id || channel.code);
+    const key = channelKey(channel);
+    if (!key) return; // a channel without id/code/name cannot be a favorite
     // TEMPORARY: trace who toggles favorites on the TV (see src/debug/tvDebug.ts)
     console.log('[dbg fav toggle]', key, channel.name, (new Error().stack || '').split('\n').slice(2, 5).join(' | '));
     setLiveFavMap(prev => {

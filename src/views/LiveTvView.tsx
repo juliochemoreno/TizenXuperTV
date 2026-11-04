@@ -3,6 +3,7 @@ import { LiveChannel, LiveCategory } from '../types/channel';
 import { playerService } from '../services/playerService';
 import { getMockChannelsForCategory } from '../services/mockLiveChannels';
 import { parentalService } from '../services/parentalService';
+import { channelKey } from '../lib/channelKey';
 import { OnScreenKeyboard, KbState, KB_INITIAL } from '../components/live/OnScreenKeyboard';
 import { normalizeText } from '../utils/normalizeText';
 
@@ -380,7 +381,7 @@ export const LiveTvView: React.FC<LiveTvViewProps> = ({
             now: c.now || c.currentProgram || 'Transmisión en directo',
             next: c.next || c.nextProgram || 'Continuación de programación',
             time: c.time || 'EN VIVO',
-            isFav: !!favMap[String(c.channelCode || c.id)]
+            isFav: !!favMap[channelKey(c)]
           }));
 
           chs.forEach(c => {
@@ -416,7 +417,7 @@ export const LiveTvView: React.FC<LiveTvViewProps> = ({
 
     if (activeCategory.isFav) {
       const allKnown = Object.values(channelMasterCache.current);
-      const favChannels = filterLockedChannels(allKnown.filter(c => favMap[String(c.id || c.code)]), categories, catId);
+      const favChannels = filterLockedChannels(allKnown.filter(c => favMap[channelKey(c)]), categories, catId);
       setChannels(favChannels);
       setIsLoadingChannels(false);
       if (onChannelsLoaded) onChannelsLoaded(favChannels);
@@ -465,7 +466,7 @@ export const LiveTvView: React.FC<LiveTvViewProps> = ({
             now: c.now || c.currentProgram || 'Transmisión en directo',
             next: c.next || c.nextProgram || 'Continuación de programación',
             time: c.time || 'EN VIVO',
-            isFav: !!favMap[String(c.channelCode || c.id)]
+            isFav: !!favMap[channelKey(c)]
           }));
           chs.forEach(c => {
             channelMasterCache.current[String(c.id || c.code)] = c;
@@ -587,7 +588,7 @@ export const LiveTvView: React.FC<LiveTvViewProps> = ({
       (tunedChannel.name && displayChannel.name && tunedChannel.name.trim().toLowerCase() === displayChannel.name.trim().toLowerCase())
     )
   );
-  const isDisplayChannelFav = !!(displayChannel && favMap[String(displayChannel.id || displayChannel.code)]);
+  const isDisplayChannelFav = !!(displayChannel && favMap[channelKey(displayChannel)]);
 
   return (
     <div className={`live-tv-view-2col ${isFullscreen ? 'is-fullscreen' : ''}`}>
@@ -650,7 +651,7 @@ export const LiveTvView: React.FC<LiveTvViewProps> = ({
                   (tunedChannel.name && ch.name && tunedChannel.name.trim().toLowerCase() === ch.name.trim().toLowerCase())
                 )
               );
-              const isCurFav = !!favMap[String(ch.id || ch.code)];
+              const isCurFav = !!favMap[channelKey(ch)];
               const initials = String(ch.name || 'TV').trim().slice(0, 2).toUpperCase();
 
               return (
@@ -876,7 +877,7 @@ export const LiveTvView: React.FC<LiveTvViewProps> = ({
                   drawerChannels.map((ch, idx) => {
                     const isChTuned = tunedChannel?.id === ch.id;
                     const isCursor = drawerArea === 'channels' && drawerFocusIndex === idx;
-                    const isFav = !!favMap[String(ch.id || ch.code)];
+                    const isFav = !!favMap[channelKey(ch)];
                     const initials = String(ch.name || 'TV').trim().slice(0, 2).toUpperCase();
 
                     return (
