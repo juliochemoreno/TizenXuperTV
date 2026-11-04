@@ -98,6 +98,8 @@ export function useLiveTv() {
   // Toggle Live Favorite
   const toggleLiveFavorite = useCallback((channel: LiveChannel) => {
     const key = String(channel.id || channel.code);
+    // TEMPORARY: trace who toggles favorites on the TV (see src/debug/tvDebug.ts)
+    console.log('[dbg fav toggle]', key, channel.name, (new Error().stack || '').split('\n').slice(2, 5).join(' | '));
     setLiveFavMap(prev => {
       const next = { ...prev, [key]: !prev[key] };
       try {
