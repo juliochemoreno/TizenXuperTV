@@ -95,7 +95,7 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
   const [audioOptions, setAudioOptions] = useState<AudioOption[]>([]);
   const [audioIndex, setAudioIndex] = useState<number>(0);
   // Remote focus: the three center buttons (-10 / play / +10) or the bottom-right buttons
-  const [focusArea, setFocusArea] = useState<'center' | 'controls'>('center');
+  const [focusArea, setFocusArea] = useState<'center' | 'timeline' | 'controls'>('center');
   const [centerIndex, setCenterIndex] = useState<number>(1);
   const [ctrlIndex, setCtrlIndex] = useState<number>(0); // 0 = subtitles, 1 = audio
   const [menu, setMenu] = useState<null | 'subs' | 'audio'>(null);
@@ -441,11 +441,9 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
       if (window.XuperAVPlay.isPaused) {
         window.XuperAVPlay.play();
         setIsPlaying(true);
-        flash('▶ Reanudado');
       } else {
         window.XuperAVPlay.pause();
         setIsPlaying(false);
-        flash('⏸ Pausa');
         saveProgress();
       }
       return;
@@ -453,10 +451,8 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
     if (!video) return;
     if (video.paused) {
       video.play().catch(() => {});
-      flash('▶ Reanudado');
     } else {
       video.pause();
-      flash('⏸ Pausa');
       saveProgress();
     }
   };
@@ -471,7 +467,6 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
     }
     timeRef.current.t = target;
     setCurrentTime(target);
-    flash(delta < 0 ? `⏪ ${delta}s` : `⏩ +${delta}s`);
   };
 
   const chooseAudio = (idx: number) => {
@@ -548,9 +543,24 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
         return;
       }
 
+      // Timeline: ◄ ► scrub (hold for bigger jumps), OK pauses, ▲ ▼ move to the buttons above / below
+      if (focusArea === 'timeline') {
+        if (isBack) onClose();
+        else if (isLeft) seekBy(e.repeat ? -30 : -10);
+        else if (isRight) seekBy(e.repeat ? 30 : 10);
+        else if (isEnter) togglePause();
+        else if (isUp) setFocusArea('center');
+        else if (isDown) {
+          setFocusArea('controls');
+          setCtrlIndex(0);
+        }
+        return;
+      }
+
       // Bottom-right buttons (Subtítulos / Audio)
       if (focusArea === 'controls') {
-        if (isBack || isUp) setFocusArea('center');
+        if (isBack) setFocusArea('center');
+        else if (isUp) setFocusArea('timeline');
         else if (isLeft) setCtrlIndex(0);
         else if (isRight) setCtrlIndex(1);
         else if (isEnter) {
@@ -590,10 +600,7 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
         else togglePause();
         return;
       }
-      if (isDown) {
-        setFocusArea('controls');
-        setCtrlIndex(0);
-      }
+      if (isDown) setFocusArea('timeline');
     };
 
     window.addEventListener('keydown', onKeyDown, { capture: true });
@@ -721,8 +728,8 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
           </div>
 
           <div className="vp-progress-row">
-            <span className="vp-time">{formatTime(currentTime)}</span>
-            <div className="vp-track">
+            <span className={`vp-time ${focusArea === 'timeline' && !menu ? 'is-focused' : ''}`}>{formatTime(currentTime)}</span>
+            <div className={`vp-track ${focusArea === 'timeline' && !menu ? 'is-focused' : ''}`}>
               <div className="vp-fill" style={{ width: `${progressPercent}%` }} />
               <div className="vp-thumb" style={{ left: `${progressPercent}%` }} />
             </div>

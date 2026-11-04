@@ -4149,3 +4149,23 @@ html.xuper-vod-avplay .app-root,
   background: rgba(0, 0, 0, 0.8);
   text-shadow: none;
 }
+
+/* Timeline focus (remote): thicker bar and a ringed thumb */
+.vp-track.is-focused {
+  height: 10px;
+  margin-top: -2px;
+  margin-bottom: -2px;
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.vp-track.is-focused .vp-thumb {
+  width: 30px;
+  height: 30px;
+  margin: -15px 0 0 -15px;
+  box-shadow: 0 0 0 5px rgba(255, 255, 255, 0.35);
+}
+
+.vp-time.is-focused {
+  color: #ffffff;
+  font-weight: 800;
+}
