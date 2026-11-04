@@ -80,7 +80,9 @@ export function tvCompatPlugin(): Plugin {
         if (!ctx.bundle) return html; // dev server keeps ES modules
         return html
           .replace(/<script type="module" crossorigin src=/g, '<script defer src=')
-          .replace(/<link rel="modulepreload"[^>]*>\s*/g, '');
+          .replace(/<link rel="modulepreload"[^>]*>\s*/g, '')
+          // Packaged app files load from the widget itself: no CORS mode for local assets
+          .replace(/(<link rel="stylesheet") crossorigin/g, '$1');
       }
     }
   };
