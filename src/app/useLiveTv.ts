@@ -4,7 +4,7 @@ import { LiveChannel, LiveCategory } from '../types/channel';
 import { MOCK_CHANNELS_BY_CATEGORY } from '../services/mockLiveChannels';
 import { KbState, KB_INITIAL } from '../components/live/OnScreenKeyboard';
 import { DrawerArea, LiveLocation } from './types';
-import { channelKey, cleanFavMap } from '../lib/channelKey';
+import { channelKey, cleanFavMap, normalizeChannel, normalizeChannels } from '../lib/channelKey';
 
 /** Live TV state: categories, channels, tuned channel, favorites and the fullscreen player/drawer */
 export function useLiveTv() {
@@ -46,7 +46,7 @@ export function useLiveTv() {
   const [tunedLiveChannel, setTunedLiveChannel] = useState<LiveChannel | null>(() => {
     try {
       const raw = localStorage.getItem('xuper_last_live_ch');
-      return raw ? JSON.parse(raw) : null;
+      return raw ? normalizeChannel<LiveChannel>(JSON.parse(raw)) : null;
     } catch {
       return null;
     }
@@ -123,7 +123,7 @@ export function useLiveTv() {
         const raw = localStorage.getItem('xuper_live_ch_cache_v2_' + catId);
         if (raw) {
           const parsed = JSON.parse(raw);
-          if (parsed && Array.isArray(parsed.channels)) return parsed.channels;
+          if (parsed && Array.isArray(parsed.channels)) return normalizeChannels<LiveChannel>(parsed.channels);
         }
       } catch {}
       return MOCK_CHANNELS_BY_CATEGORY[String(catId)] || [];

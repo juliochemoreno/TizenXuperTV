@@ -6,6 +6,7 @@ import { catalogService } from '../../services/catalogService';
 import { MOCK_CHANNELS_BY_CATEGORY } from '../../services/mockLiveChannels';
 import { OnScreenKeyboard, KbState, KB_INITIAL, pressKey, moveCursor, keyAt } from '../live/OnScreenKeyboard';
 import { normalizeText } from '../../utils/normalizeText';
+import { normalizeChannels } from '../../lib/channelKey';
 
 export interface SearchModalProps {
   isOpen: boolean;
@@ -68,7 +69,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
           if (raw) {
             const parsed = JSON.parse(raw);
             if (parsed && Array.isArray(parsed.channels)) {
-              for (const ch of parsed.channels) {
+              for (const ch of normalizeChannels<LiveChannel>(parsed.channels)) {
                 const key = String(ch.id || ch.code);
                 if (!seen.has(key)) {
                   seen.add(key);

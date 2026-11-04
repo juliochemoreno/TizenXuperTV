@@ -51,3 +51,27 @@ export function isSameChannel(a: Partial<LiveChannel> | null | undefined, b: Par
   const nb = String(b.name || '').trim().toLowerCase();
   return !!na && na === nb;
 }
+
+/**
+ * Gives a cached channel the fields the app needs. Channels saved by other versions can carry only
+ * `channelCode` / `streamUrl` (no id or code), and without them they cannot be tuned or compared.
+ */
+export function normalizeChannel<T extends Partial<LiveChannel>>(c: T): T {
+  if (!c) return c;
+  const raw = c as any;
+  const hasId = c.id !== undefined && c.id !== null && String(c.id) !== '';
+  const hasCode = !!c.code;
+  const hasUrl = c.url !== undefined && c.url !== null;
+  if (hasId && hasCode && hasUrl) return c;
+  const code = c.code || raw.channelCode || (hasId ? String(c.id) : '');
+  return {
+    ...c,
+    id: hasId ? c.id : (raw.channelCode || code),
+    code,
+    url: hasUrl ? c.url : (raw.streamUrl || '')
+  };
+}
+
+export function normalizeChannels<T extends Partial<LiveChannel>>(list: T[]): T[] {
+  return Array.isArray(list) ? list.map(normalizeChannel) : [];
+}

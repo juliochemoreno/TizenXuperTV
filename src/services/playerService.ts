@@ -1,4 +1,5 @@
 import { LiveChannel } from '../types/channel';
+import { normalizeChannel } from '../lib/channelKey';
 
 declare global {
   interface Window {
@@ -19,7 +20,11 @@ class PlayerService {
   private isFullscreen: boolean = false;
 
   public playLivePreview(channel: LiveChannel, videoEl: HTMLVideoElement | null) {
-    if (!channel || (!channel.code && !channel.url && !channel.id)) return;
+    channel = normalizeChannel(channel);
+    if (!channel || (!channel.code && !channel.url && !channel.id)) {
+      console.warn('[PlayerService] channel without id/code/url, cannot tune:', channel && channel.name);
+      return;
+    }
     const code = String(channel.code || channel.id);
 
     // If channel is already playing, do NOT reload or recreate player!

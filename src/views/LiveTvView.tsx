@@ -3,7 +3,7 @@ import { LiveChannel, LiveCategory } from '../types/channel';
 import { playerService } from '../services/playerService';
 import { getMockChannelsForCategory } from '../services/mockLiveChannels';
 import { parentalService } from '../services/parentalService';
-import { channelKey, isSameChannel } from '../lib/channelKey';
+import { channelKey, isSameChannel, normalizeChannels } from '../lib/channelKey';
 import { OnScreenKeyboard, KbState, KB_INITIAL } from '../components/live/OnScreenKeyboard';
 import { normalizeText } from '../utils/normalizeText';
 
@@ -358,8 +358,9 @@ export const LiveTvView: React.FC<LiveTvViewProps> = ({
         if (cached) {
           const parsed = JSON.parse(cached);
           if (parsed && Array.isArray(parsed.channels) && parsed.channels.length) {
-            categoryChannelsCache.set(catKey, parsed.channels);
-            parsed.channels.forEach((c: LiveChannel) => {
+            const cachedList = normalizeChannels<LiveChannel>(parsed.channels);
+            categoryChannelsCache.set(catKey, cachedList);
+            cachedList.forEach((c: LiveChannel) => {
               channelMasterCache.current[String(c.id || c.code)] = c;
             });
             setTimeout(prefetchStep, 40);
@@ -439,10 +440,11 @@ export const LiveTvView: React.FC<LiveTvViewProps> = ({
       if (cached) {
         const parsed = JSON.parse(cached);
         if (parsed && Array.isArray(parsed.channels) && parsed.channels.length) {
-          categoryChannelsCache.set(catId, parsed.channels);
-          const visible = filterLockedChannels(parsed.channels, categories, catId);
+          const cachedList = normalizeChannels<LiveChannel>(parsed.channels);
+          categoryChannelsCache.set(catId, cachedList);
+          const visible = filterLockedChannels(cachedList, categories, catId);
           setChannels(visible);
-          parsed.channels.forEach((c: LiveChannel) => {
+          cachedList.forEach((c: LiveChannel) => {
             channelMasterCache.current[String(c.id || c.code)] = c;
           });
           setIsLoadingChannels(false);
