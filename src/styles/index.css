@@ -3881,3 +3881,14 @@ html, body {
   font-size: 22px;
   font-weight: 800;
 }
+
+/* VOD on the TV: AVPlay renders below the page, so the page must be see-through while it plays */
+html.xuper-vod-avplay,
+html.xuper-vod-avplay body,
+html.xuper-vod-avplay #root,
+html.xuper-vod-avplay .app-root,
+.vod-fullscreen-player.is-avplay,
+.vod-fullscreen-player.is-avplay .vod-fullscreen-video {
+  background: transparent !important;
+  background-color: transparent !important;
+}

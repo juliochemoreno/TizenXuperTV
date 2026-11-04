@@ -591,7 +591,8 @@
           }
         });
 
-        var gen = self._gen || 0;
+        self._gen = (self._gen || 0) + 1;
+        var gen = self._gen;
         webapis.avplay.prepareAsync(function () {
           if ((self._gen || 0) !== gen) return; // stopped while preparing: do not start playback
           try {
@@ -734,7 +735,8 @@
           }
         });
 
-        var gen = self._gen || 0;
+        self._gen = (self._gen || 0) + 1;
+        var gen = self._gen;
         webapis.avplay.prepareAsync(function () {
           if ((self._gen || 0) !== gen) return; // stopped while preparing: do not start playback
           webapis.avplay.play();
@@ -754,8 +756,8 @@
     },
 
     stopLive: function () {
-      this._gen = (this._gen || 0) + 1;
       if (this.kind === 'live' || this.isPreviewActive) {
+        this._gen = (this._gen || 0) + 1;
         this.isActive = false;
         this.isPreviewActive = false;
         if (isTizen && window.webapis && webapis.avplay) {

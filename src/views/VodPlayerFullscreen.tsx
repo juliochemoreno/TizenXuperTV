@@ -73,6 +73,7 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
 
   const [streamInfoText, setStreamInfoText] = useState<string>('');
   const [browserUrl, setBrowserUrl] = useState<string | null>(null);
+  const [avMode, setAvMode] = useState(false);
 
   const epIndex = episode ? episodes.findIndex(ep => String(ep.id) === String(episode.id)) : -1;
   const nextEpisode = epIndex !== -1 && epIndex + 1 < episodes.length ? episodes[epIndex + 1] : undefined;
@@ -176,9 +177,14 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
 
     const playOnTv = (res: any) => {
       useAvPlayRef.current = true;
+      setAvMode(true);
+      // AVPlay draws below the page: everything above it must be transparent
+      document.documentElement.classList.add('xuper-vod-avplay');
+      console.log('[VodPlayer] AVPlay open', res.mime, String(res.url).slice(0, 60), 'startAt=' + startedAtRef.current);
       // tizen-bridge reads backup CDNs from here when a stream fails
       window.__xuperCurrentStreamMeta = res;
       video.onloadedmetadata = () => {
+        console.log('[VodPlayer] AVPlay prepared, duration=' + window.XuperAVPlay.durationSec);
         if (!isCurrent()) return;
         const d = window.XuperAVPlay.durationSec || res.duration || 0;
         timeRef.current.d = d;
@@ -193,13 +199,21 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
       };
       video.onwaiting = () => isCurrent() && setIsBuffering(true);
       video.onplaying = () => {
+        console.log('[VodPlayer] AVPlay playing');
         if (!isCurrent()) return;
         setIsBuffering(false);
         setIsPlaying(true);
       };
       video.onended = () => isCurrent() && handleEndedRef.current();
-      video.onerror = () => isCurrent() && (setIsBuffering(false), setError('No se pudo reproducir este contenido.'));
+      video.onerror = () => {
+        console.log('[VodPlayer] AVPlay error');
+        if (isCurrent()) {
+          setIsBuffering(false);
+          setError('No se pudo reproducir este contenido.');
+        }
+      };
       const ok = window.XuperAVPlay.playStream(res.url, res.headers, video);
+      console.log('[VodPlayer] playStream returned', ok);
       if (!ok) failed('No se pudo iniciar el reproductor de la TV.');
     };
 
@@ -324,6 +338,7 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
         document.body.style.backgroundColor = '';
       }
       window.__xuperCurrentStreamMeta = null;
+      document.documentElement.classList.remove('xuper-vod-avplay');
       if (video) {
         video.onloadedmetadata = null;
         video.ontimeupdate = null;
@@ -450,7 +465,7 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
 
   return (
-    <div className="vod-fullscreen-player">
+    <div className={`vod-fullscreen-player ${avMode ? 'is-avplay' : ''}`}>
       <video
         ref={videoRef}
         className="vod-fullscreen-video"
