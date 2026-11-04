@@ -94,7 +94,9 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
   const [cues, setCues] = useState<SubtitleCue[]>([]);
   const [audioOptions, setAudioOptions] = useState<AudioOption[]>([]);
   const [audioIndex, setAudioIndex] = useState<number>(0);
-  const [focusArea, setFocusArea] = useState<'none' | 'controls'>('none');
+  // Remote focus: the three center buttons (-10 / play / +10) or the bottom-right buttons
+  const [focusArea, setFocusArea] = useState<'center' | 'controls'>('center');
+  const [centerIndex, setCenterIndex] = useState<number>(1);
   const [ctrlIndex, setCtrlIndex] = useState<number>(0); // 0 = subtitles, 1 = audio
   const [menu, setMenu] = useState<null | 'subs' | 'audio'>(null);
   const [menuCursor, setMenuCursor] = useState<number>(0);
@@ -526,6 +528,8 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
         return;
       }
 
+      // First key while the overlay is hidden only brings it back (OK still pauses at once)
+      const wasHidden = !osdVisibleRef.current;
       triggerOsd();
 
       // Audio / subtitles menu
@@ -546,7 +550,7 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
 
       // Bottom-right buttons (Subtítulos / Audio)
       if (focusArea === 'controls') {
-        if (isBack || isUp) setFocusArea('none');
+        if (isBack || isUp) setFocusArea('center');
         else if (isLeft) setCtrlIndex(0);
         else if (isRight) setCtrlIndex(1);
         else if (isEnter) {
@@ -569,17 +573,21 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
         return;
       }
 
-      if (isEnter) {
-        togglePause();
-        return;
-      }
-      // Hold ◄ / ► to jump faster (30 s steps while the key repeats)
+      if (wasHidden && !isEnter) return;
+
+      // Center buttons: ◄ ► move between them, OK presses the focused one
       if (isLeft) {
-        seekBy(e.repeat ? -30 : -10);
+        setCenterIndex(i => Math.max(0, i - 1));
         return;
       }
       if (isRight) {
-        seekBy(e.repeat ? 30 : 10);
+        setCenterIndex(i => Math.min(2, i + 1));
+        return;
+      }
+      if (isEnter) {
+        if (centerIndex === 0) seekBy(-10);
+        else if (centerIndex === 2) seekBy(10);
+        else togglePause();
         return;
       }
       if (isDown) {
@@ -597,6 +605,8 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
   const remainingTime = duration > 0 ? Math.max(0, duration - currentTime) : 0;
   const osdVisible = showOsd || !isPlaying || !!error || !!menu || focusArea === 'controls';
+  const osdVisibleRef = useRef(osdVisible);
+  osdVisibleRef.current = osdVisible;
   const subtitleText = subIndex >= 0 ? cueAt(cues, currentTime) : '';
   const subSize = settings.size === 1 ? 'is-large' : settings.size === 2 ? 'is-small' : '';
   const subStyle = settings.style === 1 ? 'is-yellow' : settings.style === 2 ? 'is-boxed' : '';
@@ -648,14 +658,23 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
         {quality && !isTrailer && <div className="vp-badge">{quality}</div>}
 
         <div className="vp-center">
-          <div className="vp-round">
+          <div
+            className={`vp-round ${focusArea === 'center' && !menu && centerIndex === 0 ? 'is-focused' : ''}`}
+            onClick={() => seekBy(-10)}
+          >
             <span className="vp-skip">↺</span>
             <span className="vp-skip-num">10</span>
           </div>
-          <div className={`vp-round vp-play ${focusArea === 'none' && !menu ? 'is-focused' : ''}`}>
+          <div
+            className={`vp-round vp-play ${focusArea === 'center' && !menu && centerIndex === 1 ? 'is-focused' : ''}`}
+            onClick={togglePause}
+          >
             {isPlaying ? '❚❚' : '▶'}
           </div>
-          <div className="vp-round">
+          <div
+            className={`vp-round ${focusArea === 'center' && !menu && centerIndex === 2 ? 'is-focused' : ''}`}
+            onClick={() => seekBy(10)}
+          >
             <span className="vp-skip">↻</span>
             <span className="vp-skip-num">10</span>
           </div>

@@ -8,7 +8,8 @@ const EMPTY = ['', 'undefined', 'null', '0'];
  */
 export function channelKey(ch: Partial<LiveChannel> | null | undefined): string {
   if (!ch) return '';
-  for (const v of [ch.id, ch.code, ch.name]) {
+  const raw = ch as any;
+  for (const v of [ch.id, ch.code, raw.channelCode, ch.url, raw.streamUrl, ch.name]) {
     const s = String(v === undefined || v === null ? '' : v).trim();
     if (EMPTY.indexOf(s.toLowerCase()) === -1) return s;
   }
@@ -22,4 +23,31 @@ export function cleanFavMap(map: Record<string, boolean>): Record<string, boolea
     if (EMPTY.indexOf(k.trim().toLowerCase()) === -1 && map[k]) out[k] = true;
   });
   return out;
+}
+
+function identifiers(ch: Partial<LiveChannel>): string[] {
+  const raw = ch as any;
+  const out: string[] = [];
+  for (const v of [ch.id, ch.code, raw.channelCode, ch.url, raw.streamUrl]) {
+    const s = String(v === undefined || v === null ? '' : v).trim();
+    if (EMPTY.indexOf(s.toLowerCase()) === -1 && out.indexOf(s) === -1) out.push(s);
+  }
+  return out;
+}
+
+/**
+ * True when two entries are the same channel. Real identifiers (id, code, channelCode, url)
+ * decide: sharing one means same channel, and having different ones means different channels.
+ * The name is only used when a channel has no identifier at all, so two channels that happen
+ * to share a name, or that both lack an id, never match by accident.
+ */
+export function isSameChannel(a: Partial<LiveChannel> | null | undefined, b: Partial<LiveChannel> | null | undefined): boolean {
+  if (!a || !b) return false;
+  const ia = identifiers(a);
+  const ib = identifiers(b);
+  if (ia.length && ib.length) return ia.some(x => ib.indexOf(x) !== -1);
+  if (ia.length || ib.length) return false;
+  const na = String(a.name || '').trim().toLowerCase();
+  const nb = String(b.name || '').trim().toLowerCase();
+  return !!na && na === nb;
 }

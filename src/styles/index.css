@@ -3920,6 +3920,7 @@ html.xuper-vod-avplay .app-root,
 }
 
 .vp-round {
+  transition: transform 0.12s ease, background-color 0.12s ease, color 0.12s ease;
   position: relative;
   width: 72px;
   height: 72px;
@@ -3940,7 +3941,9 @@ html.xuper-vod-avplay .app-root,
 }
 
 .vp-round.is-focused {
-  background: rgba(60, 60, 60, 0.9);
+  background: #ffffff;
+  color: #000000;
+  transform: scale(1.1);
 }
 
 .vp-skip {

@@ -10,7 +10,7 @@ export function installTvDebug(): void {
   const platform = (window as any).XuperPlatform;
   if (!platform || !platform.isTizen) return;
 
-  console.log('[dbg] app start', navigator.userAgent);
+  console.log('[dbg] app start v' + __APP_VERSION__, navigator.userAgent);
   try {
     const favs = JSON.parse(localStorage.getItem('xuper_live_favs_v1') || '{}');
     const keys = Object.keys(favs).filter(k => favs[k]);

@@ -3,7 +3,7 @@ import { LiveChannel, LiveCategory } from '../types/channel';
 import { playerService } from '../services/playerService';
 import { getMockChannelsForCategory } from '../services/mockLiveChannels';
 import { parentalService } from '../services/parentalService';
-import { channelKey } from '../lib/channelKey';
+import { channelKey, isSameChannel } from '../lib/channelKey';
 import { OnScreenKeyboard, KbState, KB_INITIAL } from '../components/live/OnScreenKeyboard';
 import { normalizeText } from '../utils/normalizeText';
 
@@ -494,14 +494,18 @@ export const LiveTvView: React.FC<LiveTvViewProps> = ({
     }
   }, [activeCategory, favMap, categories, lockTick]);
 
+  // TEMPORARY (TV diagnostics): shape of the channels and how many look like favorites
+  useEffect(() => {
+    if (!channels.length || !(window as any).XuperPlatform?.isTizen) return;
+    const sample = channels.slice(0, 3).map(c => `${String(c.id)}|${String(c.code)}|${c.name}|key=${channelKey(c)}|fav=${!!favMap[channelKey(c)]}`);
+    const hits = channels.filter(c => !!favMap[channelKey(c)]).length;
+    console.log('[dbg chans]', activeCategory?.name, 'n=' + channels.length, 'favHits=' + hits, 'favKeys=' + Object.keys(favMap).length, sample.join(' ; '));
+  }, [channels, favMap]);
+
   // When channels change or load, ensure an active channel is ALWAYS selected!
   useEffect(() => {
     if (channels.length > 0) {
-      const isAnyTuned = tunedChannel && channels.some(c => 
-        String(c.id) === String(tunedChannel.id) ||
-        (c.code && tunedChannel.code && String(c.code) === String(tunedChannel.code)) ||
-        (c.name && tunedChannel.name && c.name.trim().toLowerCase() === tunedChannel.name.trim().toLowerCase())
-      );
+      const isAnyTuned = !!tunedChannel && channels.some(c => isSameChannel(c, tunedChannel));
       if (!isAnyTuned) {
         // Try restoring last saved channel from localStorage first
         try {
@@ -574,20 +578,8 @@ export const LiveTvView: React.FC<LiveTvViewProps> = ({
   const focusedChannel = channels[focus.channelIndex] || tunedChannel || channels[0] || null;
   // The info panel always describes the channel that is playing in the preview
   const displayChannel = tunedChannel || focusedChannel;
-  const isFocusedChannelTuned = !!(
-    tunedChannel && focusedChannel && (
-      String(tunedChannel.id) === String(focusedChannel.id) ||
-      (tunedChannel.code && focusedChannel.code && String(tunedChannel.code) === String(focusedChannel.code)) ||
-      (tunedChannel.name && focusedChannel.name && tunedChannel.name.trim().toLowerCase() === focusedChannel.name.trim().toLowerCase())
-    )
-  );
-  const isDisplayChannelTuned = !!(
-    tunedChannel && displayChannel && (
-      String(tunedChannel.id) === String(displayChannel.id) ||
-      (tunedChannel.code && displayChannel.code && String(tunedChannel.code) === String(displayChannel.code)) ||
-      (tunedChannel.name && displayChannel.name && tunedChannel.name.trim().toLowerCase() === displayChannel.name.trim().toLowerCase())
-    )
-  );
+  const isFocusedChannelTuned = isSameChannel(tunedChannel, focusedChannel);
+  const isDisplayChannelTuned = isSameChannel(tunedChannel, displayChannel);
   const isDisplayChannelFav = !!(displayChannel && favMap[channelKey(displayChannel)]);
 
   return (
@@ -644,13 +636,7 @@ export const LiveTvView: React.FC<LiveTvViewProps> = ({
           ) : (
             channels.map((ch, idx) => {
               const isCursorFocused = isFocusActive && focus.area === 'channels' && focus.channelIndex === idx;
-              const isChannelTuned = !!(
-                tunedChannel && (
-                  String(tunedChannel.id) === String(ch.id) ||
-                  (tunedChannel.code && ch.code && String(tunedChannel.code) === String(ch.code)) ||
-                  (tunedChannel.name && ch.name && tunedChannel.name.trim().toLowerCase() === ch.name.trim().toLowerCase())
-                )
-              );
+              const isChannelTuned = isSameChannel(tunedChannel, ch);
               const isCurFav = !!favMap[channelKey(ch)];
               const initials = String(ch.name || 'TV').trim().slice(0, 2).toUpperCase();
 
@@ -875,7 +861,7 @@ export const LiveTvView: React.FC<LiveTvViewProps> = ({
                   </div>
                 ) : (
                   drawerChannels.map((ch, idx) => {
-                    const isChTuned = tunedChannel?.id === ch.id;
+                    const isChTuned = isSameChannel(tunedChannel, ch);
                     const isCursor = drawerArea === 'channels' && drawerFocusIndex === idx;
                     const isFav = !!favMap[channelKey(ch)];
                     const initials = String(ch.name || 'TV').trim().slice(0, 2).toUpperCase();

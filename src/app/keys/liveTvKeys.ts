@@ -1,5 +1,6 @@
 import { TvKey } from '../../hooks/useTvRemote';
 import { DEFAULT_LIVE_CATEGORIES } from '../../views/LiveTvView';
+import { isSameChannel } from '../../lib/channelKey';
 import { LiveTvState } from '../useLiveTv';
 
 export type LiveTvKeysCtx = LiveTvState & {
@@ -108,7 +109,7 @@ export function handleLiveTvKeys(key: TvKey, ctx: LiveTvKeysCtx): boolean {
       // OK / Enter pressed on a channel:
       const focusedChannel = liveChannelsRef.current[liveTvFocus.channelIndex];
       if (focusedChannel) {
-        if (tunedLiveChannel && tunedLiveChannel.id === focusedChannel.id) {
+        if (isSameChannel(tunedLiveChannel, focusedChannel)) {
           // Channel is already playing -> Go fullscreen!
           setIsFullscreenLive(true);
           triggerOsd();

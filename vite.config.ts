@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import fs from 'fs';
 import http from 'http';
 import https from 'https';
 import { URL } from 'url';
@@ -106,7 +107,11 @@ function streamProxyPlugin() {
 }
 
 // https://vitejs.dev/config/
+// App version from the Tizen widget manifest (shown in the TV diagnostic logs)
+const appVersion = (fs.readFileSync(path.resolve(__dirname, 'public/config.xml'), 'utf8').match(/<widget[^>]*\sversion="([^"]+)"/) || [])[1] || 'dev';
+
 export default defineConfig({
+  define: { __APP_VERSION__: JSON.stringify(appVersion) },
   plugins: [react(), streamProxyPlugin(), tvCompatPlugin()],
   base: './',
   server: {
