@@ -401,18 +401,52 @@ const TITLE_TAGS: [RegExp, string][] = [
   [/suspenso|thriller/i, 'Thriller']
 ];
 
-/** Where "Ver todo" of a row goes: the tab's section, filtered by the genre or year in the row title */
-export function browseTargetForRow(row: ContentRowDef, selectedTab: TabId): { root: BrowseRoot; tag?: string; year?: string } {
+// Portal column names that are genres (the home rows of each root)
+const COLUMN_TAGS: Record<string, string> = {
+  horror: 'Horror', terror: 'Horror', accion: 'Action', crimen: 'Crime', comedia: 'Comedy', familia: 'Family',
+  fantastico: 'Fantasy', fantasia: 'Fantasy', historia: 'History', misterio: 'Mystery', romantico: 'Romance',
+  romance: 'Romance', suspenso: 'Thriller', occidental: 'Western', 'ciencia ficcion': 'Sci-Fi', biografia: 'Biography',
+  documental: 'Documentary', aventuras: 'Adventure', aventura: 'Adventure', animacion: 'Animation', drama: 'Drama'
+};
+
+function plain(text: string): string {
+  return text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+}
+
+export interface BrowseTarget {
+  root: BrowseRoot;
+  tag?: string;
+  year?: string;
+  /** Portal column the row comes from, when it is not a genre or a year (e.g. "Netflix Movie") */
+  column?: string;
+}
+
+/**
+ * Where "Ver todo" of a row goes. The row's own portal column wins: a genre or year column opens
+ * the section's full catalog with that filter; any other column (a platform, a curated list)
+ * opens the titles of that column, since the portal has no full listing per column. Rows made by
+ * the app (slices of a section) fall back to the genre or year in their title.
+ */
+export function browseTargetForRow(row: ContentRowDef, selectedTab: TabId): BrowseTarget {
+  const items = row.items as VodItem[];
   let root: BrowseRoot;
   if (selectedTab === 'kids') root = 'kids';
   else if (selectedTab === 'anime') root = 'anime';
   else if (selectedTab === 'series') root = 'series';
   else if (selectedTab === 'peliculas') root = 'movies';
-  else {
-    const items = row.items as VodItem[];
-    const series = items.filter(it => it.isSeries).length;
-    root = series > items.length / 2 ? 'series' : 'movies';
+  else root = items.filter(it => it.isSeries).length > items.length / 2 ? 'series' : 'movies';
+
+  // Portal column shared by most of the row's titles
+  const counts: Record<string, number> = {};
+  items.forEach(it => { if (it.row) counts[it.row] = (counts[it.row] || 0) + 1; });
+  const top = Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0];
+  if (top && counts[top] >= items.length * 0.6) {
+    const tag = COLUMN_TAGS[plain(top)];
+    const year = /\b(19|20)\d{2}\b/.exec(top);
+    if (tag || year) return { root, tag, year: year ? year[0] : undefined };
+    return { root, column: top };
   }
+
   const text = `${row.title} ${row.subtitle || ''}`;
   const tagHit = TITLE_TAGS.find(([re]) => re.test(text));
   const yearHit = /\b(19|20)\d{2}\b/.exec(text);

@@ -12,6 +12,8 @@ interface BrowseScreenProps {
   title: string;
   initialTag?: string;
   initialYear?: string;
+  /** A fixed list (a portal column with no full listing): shown as is, without filters */
+  fixedItems?: VodItem[];
   onClose: () => void;
   onOpenVod: (item: VodItem) => void;
 }
@@ -51,8 +53,16 @@ interface Page {
   total: number;
 }
 
-function loadPage(root: BrowseRoot, tag: string, year: string, pageNum: number): Promise<Page> {
-  return new Promise((resolve, reject) => {
+// Pages already asked for (this session): going back to a filter, or one prefetched, is instant
+const pageCache = new Map<string, { promise: Promise<Page>; low: boolean; done: boolean }>();
+
+/** `low`: prefetch, behind every request the user is waiting for */
+function loadPage(root: BrowseRoot, tag: string, year: string, pageNum: number, low = false): Promise<Page> {
+  const key = `${root}|${tag}|${year}|${pageNum}`;
+  const hit = pageCache.get(key);
+  // A prefetch still waiting in the queue is asked again with priority (the first answer wins)
+  if (hit && (hit.done || !hit.low || low)) return hit.promise;
+  const p = new Promise<Page>((resolve, reject) => {
     const client = window.MagisClient;
     if (!client || typeof client.browse !== 'function') return reject(new Error('no portal client'));
     client.browse(root, { tags: tag, year }, pageNum, PAGE_SIZE, (err: any, res: any) => {
@@ -62,8 +72,13 @@ function loadPage(root: BrowseRoot, tag: string, year: string, pageNum: number):
         isSeries: it.type === 'teleplay' || it.kind === 'serie'
       }));
       resolve({ items, total: res.total || 0 });
-    });
+    }, { low });
   });
+  const promise = hit ? Promise.race([hit.promise, p]) : p;
+  const entry = { promise, low, done: false };
+  pageCache.set(key, entry);
+  promise.then(() => { entry.done = true; }, () => pageCache.delete(key));
+  return promise;
 }
 
 /** "Ver todo": the full catalog of a section from the portal, with genre and year filters */
@@ -74,6 +89,7 @@ export const BrowseScreen: React.FC<BrowseScreenProps> = ({
   title,
   initialTag = '',
   initialYear = '',
+  fixedItems,
   onClose,
   onOpenVod
 }) => {
@@ -81,9 +97,9 @@ export const BrowseScreen: React.FC<BrowseScreenProps> = ({
   const [years, setYears] = useState<string[]>([]);
   const [tag, setTag] = useState(initialTag);
   const [year, setYear] = useState(initialYear);
-  const [items, setItems] = useState<VodItem[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const [items, setItems] = useState<VodItem[]>(fixedItems || []);
+  const [total, setTotal] = useState(fixedItems ? fixedItems.length : 0);
+  const [loading, setLoading] = useState(!fixedItems);
   const [failed, setFailed] = useState(false);
   const [area, setArea] = useState<Area>('grid');
   const [barIndex, setBarIndex] = useState(0); // 0 = genre, 1 = year
@@ -97,7 +113,7 @@ export const BrowseScreen: React.FC<BrowseScreenProps> = ({
   // Filter values of the section
   useEffect(() => {
     const client = window.MagisClient;
-    if (!client || typeof client.browseFilters !== 'function') return;
+    if (fixedItems || !client || typeof client.browseFilters !== 'function') return;
     client.browseFilters(root, (err: any, res: any) => {
       if (err || !res) return;
       setTags(res.tags || []);
@@ -106,14 +122,17 @@ export const BrowseScreen: React.FC<BrowseScreenProps> = ({
   }, [root]);
 
   const loadMore = useCallback(() => {
-    if (loadingRef.current) return;
+    if (fixedItems || loadingRef.current) return;
     const query = queryRef.current;
     loadingRef.current = true;
     setLoading(true);
+    const first = pageRef.current === 0;
     loadPage(root, tag, year, pageRef.current + 1).then(page => {
       if (query !== queryRef.current) return;
       pageRef.current += 1;
-      setItems(prev => prev.concat(page.items));
+      // A new filter replaces the grid only when its first page is here (no empty screen meanwhile)
+      setItems(prev => (first ? page.items : prev.concat(page.items)));
+      if (first) setCursor(0);
       setTotal(page.total);
       setFailed(false);
     }, () => {
@@ -127,12 +146,10 @@ export const BrowseScreen: React.FC<BrowseScreenProps> = ({
 
   // New filter: start over from page 1
   useEffect(() => {
+    if (fixedItems) return;
     queryRef.current += 1;
     pageRef.current = 0;
     loadingRef.current = false;
-    setItems([]);
-    setTotal(0);
-    setCursor(0);
     loadMore();
   }, [loadMore]);
 
@@ -154,9 +171,28 @@ export const BrowseScreen: React.FC<BrowseScreenProps> = ({
   const menuOptions = menuFilter === 'tag' ? tagOptions : yearOptions;
   const optionLabel = (f: Filter, v: string) => (f === 'tag' ? (v ? tagLabel(v) : 'Todos') : v || 'Todos');
 
+  // The option under the cursor is fetched right away (with priority), so OK finds it ready
+  useEffect(() => {
+    if (area !== 'menu') return;
+    const v = menuOptions[menuCursor];
+    if (v === undefined) return;
+    const t = setTimeout(() => {
+      if (menuFilter === 'tag') loadPage(root, v, year, 1).catch(() => {});
+      else loadPage(root, tag, v, 1).catch(() => {});
+    }, 150);
+    return () => clearTimeout(t);
+  }, [area, menuCursor, menuFilter]);
+
   const openMenu = () => {
     setArea('menu');
-    setMenuCursor(Math.max(0, menuOptions.indexOf(menuFilter === 'tag' ? tag : year)));
+    const at = Math.max(0, menuOptions.indexOf(menuFilter === 'tag' ? tag : year));
+    setMenuCursor(at);
+    // Prefetch the first page of every option, nearest first, behind any real request
+    const order = menuOptions.map((v, i) => ({ v, d: Math.abs(i - at) })).sort((a, b) => a.d - b.d);
+    order.forEach(({ v }) => {
+      if (menuFilter === 'tag') loadPage(root, v, year, 1, true).catch(() => {});
+      else loadPage(root, tag, v, 1, true).catch(() => {});
+    });
   };
 
   useScreenKeys(key => {
@@ -171,7 +207,7 @@ export const BrowseScreen: React.FC<BrowseScreenProps> = ({
       else if (key === 'right') setCursor(c => (c % COLS === COLS - 1 || c + 1 >= items.length ? c : c + 1));
       else if (key === 'down') setCursor(c => (c + COLS < items.length ? c + COLS : c));
       else if (key === 'up') {
-        if (cursor < COLS) setArea('bar');
+        if (cursor < COLS && !fixedItems) setArea('bar');
         else setCursor(c => c - COLS);
       } else if (key === 'enter') {
         const it = items[cursor];
@@ -226,23 +262,26 @@ export const BrowseScreen: React.FC<BrowseScreenProps> = ({
     </div>
   );
 
-  const sectionTitle = title || ROOT_LABEL[root];
+  // The row's title while its filter is on; the section name once the user changes the filters
+  const sectionTitle = (fixedItems || (tag === initialTag && year === initialYear)) && title ? title : ROOT_LABEL[root];
 
   return (
     <div className="browse-screen" style={hidden ? { display: 'none' } : undefined}>
       <div className="browse-head">
         <div className="browse-title">{sectionTitle}</div>
-        <div className="browse-filters">
-          {filterButton(0, 'tag', tag)}
-          {filterButton(1, 'year', year)}
-        </div>
+        {!fixedItems && (
+          <div className="browse-filters">
+            {filterButton(0, 'tag', tag)}
+            {filterButton(1, 'year', year)}
+          </div>
+        )}
         <div className="browse-count">
           {total ? `${total.toLocaleString('es')} títulos` : loading ? 'Cargando…' : ''}
         </div>
       </div>
 
       <div className="browse-body">
-        <div className="browse-grid" ref={gridRef}>
+        <div className={`browse-grid ${loading && pageRef.current === 0 && items.length ? 'is-loading' : ''}`} ref={gridRef}>
           {items.map((it, i) => (
             <PosterCard
               key={`${it.id}-${i}`}

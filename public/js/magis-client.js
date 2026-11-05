@@ -1425,7 +1425,8 @@
   };
 
   // Full catalog of a root, page by page; filters: { tags, year, originalCountry } (portal values, in English)
-  function browse(root, filters, pageNum, pageSize, callback) {
+  // opts.low: prefetch, waits behind every other request
+  function browse(root, filters, pageNum, pageSize, callback, opts) {
     var columnId = ROOT_IDS[root];
     if (!columnId) return callback(new Error('unknown root ' + root));
     var body = { columnId: columnId, pageNum: Math.max(1, pageNum || 1), pageSize: pageSize || 42 };
@@ -1435,7 +1436,7 @@
     if (filters.originalCountry) body.originalCountry = filters.originalCountry;
     ensureSession(function (err) {
       if (err) return callback(err);
-      call('v3/filterByContent', body, function (fErr, fRes) {
+      call('v3/filterByContent', body, { low: !!(opts && opts.low) }, function (fErr, fRes) {
         if (fErr) return callback(fErr);
         var list = fRes && fRes.assetList || [];
         var items = [];

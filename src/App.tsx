@@ -235,8 +235,16 @@ export const App: React.FC = () => {
   // "Ver todo" of a row: the section's full catalog, filtered by the row's genre or year
   const openSeeAll = useCallback((row: ContentRowDef) => {
     const target = browseTargetForRow(row, selectedTab);
-    push({ id: 'browse', root: target.root, title: '', tag: target.tag, year: target.year });
-  }, [selectedTab, push]);
+    if (target.column) {
+      // The column's titles (all roots) plus the row's own, without repeats
+      const seen = new Set<string>();
+      const items = [...(catalog.catalogRows[target.column] || []), ...(row.items as VodItem[])]
+        .filter(it => (seen.has(it.id) ? false : (seen.add(it.id), true)));
+      push({ id: 'browse', root: target.root, title: row.title, items });
+      return;
+    }
+    push({ id: 'browse', root: target.root, title: row.title, tag: target.tag, year: target.year });
+  }, [selectedTab, push, catalog.catalogRows]);
 
   // Each VOD tab remembers its focus, hero slide and scroll; a new tab starts at the top
   const tabMemoryRef = useRef<Partial<Record<TabId, { focus: DestacadosFocus; hero: number; scrollTop: number }>>>({});
@@ -547,6 +555,7 @@ export const App: React.FC = () => {
               title={screen.title}
               initialTag={screen.tag}
               initialYear={screen.year}
+              fixedItems={screen.items}
               onClose={pop}
               onOpenVod={it => handleOpenDetail(it)}
             />

@@ -157,6 +157,16 @@ function shrink(url: string, w: number, h: number): Promise<any> {
   });
 }
 
+/** Natural size of an image (downloads it; browsers decode only when it is drawn) */
+function probeSize(url: string): Promise<{ w: number; h: number } | null> {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => resolve(img.naturalWidth ? { w: img.naturalWidth, h: img.naturalHeight } : null);
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+}
+
 /** Card-size copy of `url` for a box of w x h px; resolves to the original URL when it cannot be made */
 export function optimizedImage(url: string, w: number, h: number): Promise<string> {
   if (!/^https?:/.test(url) || disabled) return Promise.resolve(url);
@@ -170,7 +180,15 @@ export function optimizedImage(url: string, w: number, h: number): Promise<strin
     if (cached === ORIGINAL) return url;
     if (cached instanceof Blob) return URL.createObjectURL(cached);
     const t0 = Date.now();
-    return shrink(url, w, h).then(res => {
+    // Most posters are already card size: the size is known once downloaded (no decoding),
+    // and those are used as they are without waiting for the worker
+    return probeSize(url).then(size => {
+      if (size && Math.max(w / size.w, h / size.h) >= 0.8) {
+        dbPut(key, ORIGINAL);
+        return { small: true };
+      }
+      return shrink(url, w, h);
+    }).then(res => {
       if (res.small) {
         dbPut(key, ORIGINAL);
         return url;

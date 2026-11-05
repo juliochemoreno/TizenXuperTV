@@ -4457,3 +4457,7 @@ html.xuper-vod-avplay .app-root,
   font-size: 22px;
   color: rgba(255, 255, 255, 0.6);
 }
+
+.browse-grid.is-loading {
+  opacity: 0.45;
+}
