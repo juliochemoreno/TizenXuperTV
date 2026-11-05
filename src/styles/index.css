@@ -4260,3 +4260,18 @@ html.xuper-vod-avplay .app-root,
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* Playback settings menu: three groups, kept compact to fit above the controls */
+.vp-menu.is-settings {
+  right: 0;
+  min-width: 340px;
+}
+
+.vp-menu.is-settings .vp-menu-row {
+  padding: 8px 14px;
+  font-size: 18px;
+}
+
+.vp-menu.is-settings .vp-menu-title {
+  padding-top: 10px;
+}

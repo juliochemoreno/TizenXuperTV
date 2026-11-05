@@ -33,6 +33,20 @@ const DEV_FALLBACK_URL = 'https://media.w3.org/2010/05/bunny/movie.mp4';
 const SAVE_EVERY_MS = 15000;
 const NEXT_EPISODE_SECONDS = 10;
 
+interface SettingRow {
+  group: string;
+  label: string;
+  selected: boolean;
+  apply: () => void;
+}
+
+// Same order as PlaybackSettings.display and the bridge's _displayMethod
+const DISPLAY_METHODS = ['PLAYER_DISPLAY_MODE_LETTER_BOX', 'PLAYER_DISPLAY_MODE_FULL_SCREEN', 'PLAYER_DISPLAY_MODE_AUTO_ASPECT_RATIO'];
+const DISPLAY_LABELS = ['Ajustar (con bandas)', 'Pantalla completa', 'Automático'];
+const DISPLAY_FIT = ['contain', 'cover', 'contain'] as const;
+const SUB_SIZE_LABELS = ['Normal', 'Grande', 'Pequeño'];
+const SUB_STYLE_LABELS = ['Blanco', 'Amarillo', 'Con fondo'];
+
 interface AudioOption {
   kind: 'avplay' | 'portal';
   index: number;
@@ -97,8 +111,8 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
   // Remote focus: the three center buttons (-10 / play / +10) or the bottom-right buttons
   const [focusArea, setFocusArea] = useState<'center' | 'timeline' | 'controls'>('center');
   const [centerIndex, setCenterIndex] = useState<number>(1);
-  const [ctrlIndex, setCtrlIndex] = useState<number>(0); // 0 = subtitles, 1 = audio, 2 = episodes
-  const [menu, setMenu] = useState<null | 'subs' | 'audio' | 'episodes'>(null);
+  const [ctrlIndex, setCtrlIndex] = useState<number>(0); // 0 = subtitles, 1 = audio, then episodes (series) and settings
+  const [menu, setMenu] = useState<null | 'subs' | 'audio' | 'episodes' | 'settings'>(null);
   const [menuCursor, setMenuCursor] = useState<number>(0);
   const [toastId, setToastId] = useState<number>(0);
   const portalTrackRef = useRef<number>(0);
@@ -108,13 +122,15 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
   const seekTimerRef = useRef<any>(null);
   const acceptTimeRef = useRef<(t: number) => boolean>(() => true);
   const toastTimerRef = useRef<any>(null);
+  const [, setSettingsTick] = useState(0); // re-render after a setting changes
   const settings = settingsService.get();
 
   const epIndex = episode ? episodes.findIndex(ep => String(ep.id) === String(episode.id)) : -1;
   const nextEpisode = epIndex !== -1 && epIndex + 1 < episodes.length ? episodes[epIndex + 1] : undefined;
   // Episode shelf (like Apple TV): the other episodes of the season, without leaving the player
   const hasEpisodeShelf = !isTrailer && !!onPlayEpisode && episodes.length > 1;
-  const ctrlCount = hasEpisodeShelf ? 3 : 2;
+  const settingsCtrl = hasEpisodeShelf ? 3 : 2;
+  const ctrlCount = settingsCtrl + 1;
   const epNumber = episode ? (episode.number || epIndex + 1 || 1) : 0;
 
   const title = isTrailer ? `${item.title} — Tráiler Oficial` : item.title;
@@ -567,7 +583,19 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
   // Menu rows: subtitles start with "Desactivados" (-1)
   const subRows = [{ label: 'Desactivados', value: -1 }, ...subtitles.map((sb, i) => ({ label: languageName(sb.lang), value: i }))];
   const audioRows = audioOptions.map((a, i) => ({ label: a.label, value: i }));
-  const menuRows = menu === 'subs' ? subRows : audioRows;
+  // Playback settings (also in Perfil > Configuración): screen format and subtitle look
+  const applyDisplay = (idx: number) => {
+    settingsService.set({ display: idx });
+    if (avMode) {
+      try { window.webapis.avplay.setDisplayMethod(DISPLAY_METHODS[idx]); } catch (e) {}
+    }
+  };
+  const settingRows: SettingRow[] = [
+    ...DISPLAY_LABELS.map((label, i) => ({ group: 'Formato de pantalla', label, selected: settings.display === i, apply: () => applyDisplay(i) })),
+    ...SUB_SIZE_LABELS.map((label, i) => ({ group: 'Tamaño de subtítulos', label, selected: settings.size === i, apply: () => settingsService.set({ size: i }) })),
+    ...SUB_STYLE_LABELS.map((label, i) => ({ group: 'Estilo de subtítulos', label, selected: settings.style === i, apply: () => settingsService.set({ style: i }) }))
+  ];
+  const menuRows = menu === 'subs' ? subRows : menu === 'settings' ? settingRows : audioRows;
 
   // Handle TV Remote Keys during full playback
   useEffect(() => {
@@ -635,7 +663,16 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
         else if (isUp) setMenuCursor(c => Math.max(0, c - 1));
         else if (isDown) setMenuCursor(c => Math.min(menuRows.length - 1, c + 1));
         else if (isEnter) {
-          const row = menuRows[menuCursor];
+          if (menu === 'settings') {
+            // Settings stay open so the check mark moves to the new choice
+            const row = settingRows[menuCursor];
+            if (row) {
+              row.apply();
+              setSettingsTick(t => t + 1);
+            }
+            return;
+          }
+          const row = (menu === 'subs' ? subRows : audioRows)[menuCursor];
           if (row) {
             if (menu === 'subs') chooseSubtitle(row.value);
             else chooseAudio(row.value);
@@ -645,27 +682,28 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
         return;
       }
 
-      // Timeline: ◄ ► scrub (hold for bigger jumps), OK pauses, ▲ ▼ move to the buttons above / below
+      // Focus order follows the screen, top to bottom: center buttons, controls row, timeline
+      // Timeline (bottom): ◄ ► scrub (hold for bigger jumps), OK pauses, ▲ goes to the controls row
       if (focusArea === 'timeline') {
         if (isBack) onClose();
         else if (isLeft) seekBy(e.repeat ? -30 : -10);
         else if (isRight) seekBy(e.repeat ? 30 : 10);
         else if (isEnter) togglePause();
-        else if (isUp) setFocusArea('center');
-        else if (isDown) {
-          setFocusArea('controls');
-          setCtrlIndex(0);
-        }
+        else if (isUp) setFocusArea(isTrailer ? 'center' : 'controls');
         return;
       }
 
-      // Bottom-right buttons (Subtítulos / Audio)
+      // Controls row above the timeline (Subtítulos / Audio / Episodios)
       if (focusArea === 'controls') {
         if (isBack) setFocusArea('center');
-        else if (isUp) setFocusArea('timeline');
+        else if (isUp) setFocusArea('center');
+        else if (isDown) setFocusArea('timeline');
         else if (isLeft) setCtrlIndex(i => Math.max(0, i - 1));
         else if (isRight) setCtrlIndex(i => Math.min(ctrlCount - 1, i + 1));
-        else if (isEnter && ctrlIndex === 2) {
+        else if (isEnter && ctrlIndex === settingsCtrl) {
+          setMenu('settings');
+          setMenuCursor(Math.max(0, settingRows.findIndex(r => r.selected)));
+        } else if (isEnter && ctrlIndex === 2) {
           setMenu('episodes');
           setMenuCursor(Math.max(0, epIndex));
         } else if (isEnter) {
@@ -705,7 +743,13 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
         else togglePause();
         return;
       }
-      if (isDown) setFocusArea('timeline');
+      if (isDown) {
+        if (isTrailer) setFocusArea('timeline');
+        else {
+          setFocusArea('controls');
+          setCtrlIndex(0);
+        }
+      }
     };
 
     window.addEventListener('keydown', onKeyDown, { capture: true });
@@ -729,6 +773,7 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
       <video
         ref={videoRef}
         className="vod-fullscreen-video"
+        style={{ objectFit: DISPLAY_FIT[settings.display] || 'contain' }}
         playsInline
         autoPlay
       />
@@ -821,7 +866,28 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
                   </div>
                 )}
 
-                {menu && menu !== 'episodes' && (
+                <div className={`vp-ctrl ${focusArea === 'controls' && ctrlIndex === settingsCtrl ? 'is-focused' : ''} ${menu === 'settings' ? 'is-on' : ''}`} title="Ajustes">
+                  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="3" />
+                    <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1" />
+                  </svg>
+                </div>
+
+                {menu === 'settings' && (
+                  <div className="vp-menu is-settings">
+                    {settingRows.map((row, i) => (
+                      <React.Fragment key={row.group + row.label}>
+                        {(i === 0 || settingRows[i - 1].group !== row.group) && <div className="vp-menu-title">{row.group}</div>}
+                        <div className={`vp-menu-row ${i === menuCursor ? 'is-focused' : ''}`}>
+                          <span className="vp-check">{row.selected ? '✓' : ''}</span>
+                          <span>{row.label}</span>
+                        </div>
+                      </React.Fragment>
+                    ))}
+                  </div>
+                )}
+
+                {menu && menu !== 'episodes' && menu !== 'settings' && (
                   <div className={`vp-menu ${menu === 'audio' ? 'is-audio' : ''}`}>
                     <div className="vp-menu-title">{menu === 'subs' ? 'Subtítulos' : 'Audio'}</div>
                     {menuRows.length === 0 && <div className="vp-menu-empty">No hay opciones</div>}
