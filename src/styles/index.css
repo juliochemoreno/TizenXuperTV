@@ -4457,8 +4457,9 @@ html.xuper-vod-avplay .app-root,
 }
 
 .browse-grid {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(9, 176px);
+  justify-content: start;
   gap: 24px 22px;
   transition: transform 0.25s ease-out;
 }

@@ -21,10 +21,14 @@ interface BrowseScreenProps {
 type Area = 'bar' | 'menu' | 'grid';
 type Filter = 'tag' | 'year';
 
-const COLS = 9;
+// Card box and gaps, same as .browse-grid; the column count is measured from the screen width
+const CARD_W = 176;
+const CARD_H = 262;
+const GAP_X = 22;
+const GAP_Y = 24;
 // Portal answers are TripleDES-decrypted on the main thread: smaller pages block the TV less
-const PAGE_SIZE = COLS * 4;
-const ROW_HEIGHT = 286; // card + gap, see .browse-grid
+const PAGE_SIZE = 36;
+const ROW_HEIGHT = CARD_H + GAP_Y;
 const IMAGE_ROWS_AHEAD = 3;
 const MENU_VISIBLE = 9;
 
@@ -110,6 +114,19 @@ export const BrowseScreen: React.FC<BrowseScreenProps> = ({
   const loadingRef = useRef(false);
   const queryRef = useRef(0);
   const gridRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  // Columns that fit the body: the key logic and the CSS grid share this number
+  const [cols, setCols] = useState(9);
+  useEffect(() => {
+    const measure = () => {
+      const w = bodyRef.current ? bodyRef.current.clientWidth : 0;
+      setCols(Math.max(1, Math.floor((w + GAP_X) / (CARD_W + GAP_X))) || 9);
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, []);
+  const COLS = cols;
 
   // Filter values of the section
   useEffect(() => {
@@ -280,8 +297,12 @@ export const BrowseScreen: React.FC<BrowseScreenProps> = ({
         </div>
       </div>
 
-      <div className="browse-body">
-        <div className={`browse-grid ${loading && pageRef.current === 0 && items.length ? 'is-loading' : ''}`} ref={gridRef}>
+      <div className="browse-body" ref={bodyRef}>
+        <div
+          className={`browse-grid ${loading && pageRef.current === 0 && items.length ? 'is-loading' : ''}`}
+          ref={gridRef}
+          style={{ gridTemplateColumns: `repeat(${cols}, ${CARD_W}px)` }}
+        >
           {items.map((it, i) => (
             <PosterCard
               key={`${it.id}-${i}`}
