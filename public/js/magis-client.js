@@ -131,13 +131,17 @@
     return dec.toString(CryptoJS.enc.Utf8);
   }
 
-  // Decrypt + parse in a worker (js/magis-worker.js); the main thread only when workers fail
-  // Two workers: a long background download (a home root takes seconds to decrypt on the TV) never
-  // delays the answer the user is waiting for
-  var decWorkers = [null, null];
+  // Decrypt in workers (js/magis-worker.js). TripleDES-ECB blocks are independent, so a big answer
+  // is cut into slices that several workers decrypt in parallel (the TV takes ~13 s for 400 KB in
+  // one piece); the main thread only joins the bytes and parses. Two pools: foreground (what the
+  // user waits for, up to 4 workers) and background (1 worker, so it leaves CPU to the foreground).
+  var CORES = Math.max(2, Math.min(4, (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 2));
+  var decPools = [[], []]; // [foreground, background]
+  var decPoolSize = [CORES, 1];
   var decWorkerBroken = false;
   var decJobs = {};
   var decSeq = 0;
+  var MIN_SLICE_HEX = 64 * 128; // slices are multiples of 64 hex chars (24 bytes); below this, no split
 
   function decryptSync(hex, cb) {
     var data;
@@ -150,14 +154,17 @@
   }
 
   function failDecWorker(why) {
+    if (decWorkerBroken) return;
     decWorkerBroken = true;
     var jobs = decJobs;
     decJobs = {};
-    for (var w = 0; w < decWorkers.length; w++) {
-      try { if (decWorkers[w]) decWorkers[w].terminate(); } catch (e) {}
-      decWorkers[w] = null;
+    for (var p = 0; p < decPools.length; p++) {
+      for (var w = 0; w < decPools[p].length; w++) {
+        try { decPools[p][w].terminate(); } catch (e) {}
+      }
+      decPools[p] = [];
     }
-    console.log('[MagisClient] decrypt worker off, using main thread:', why);
+    console.log('[MagisClient] decrypt workers off, using main thread:', why);
     for (var id in jobs) {
       if (Object.prototype.hasOwnProperty.call(jobs, id)) {
         (function (job) { setTimeout(function () { decryptSync(job.hex, job.cb); }, 0); })(jobs[id]);
@@ -165,28 +172,69 @@
     }
   }
 
-  function decryptData(hex, cb, low) {
-    if (decWorkerBroken || typeof Worker === 'undefined') return decryptSync(hex, cb);
-    var slot = low ? 1 : 0;
-    if (!decWorkers[slot]) {
-      try {
-        var wk = new Worker('js/magis-worker.js');
-        wk.onmessage = function (e) {
-          var job = decJobs[e.data.id];
-          delete decJobs[e.data.id];
-          if (!job) return;
-          if (e.data.error) job.cb(new Error(e.data.error));
-          else job.cb(null, e.data.data);
-        };
-        wk.onerror = function (e) { failDecWorker(e && e.message); };
-        decWorkers[slot] = wk;
-      } catch (e) {
-        return failDecWorker(e && e.message);
-      }
+  function onDecMessage(e) {
+    var m = e.data;
+    var job = decJobs[m.id];
+    if (!job) return;
+    if (m.error) {
+      delete decJobs[m.id];
+      return job.cb(new Error(m.error));
     }
+    job.parts[m.part] = new Uint8Array(m.bytes);
+    if (--job.pending > 0) return;
+    delete decJobs[m.id];
+    var total = 0, k;
+    for (k = 0; k < job.parts.length; k++) total += job.parts[k].length;
+    var all = new Uint8Array(total);
+    var at = 0;
+    for (k = 0; k < job.parts.length; k++) {
+      all.set(job.parts[k], at);
+      at += job.parts[k].length;
+    }
+    var data;
+    try {
+      data = JSON.parse(new TextDecoder('utf-8').decode(all));
+    } catch (err) {
+      return job.cb(err);
+    }
+    job.cb(null, data);
+  }
+
+  function getDecWorker(pool, idx) {
+    if (!decPools[pool][idx]) {
+      var wk = new Worker('js/magis-worker.js');
+      wk.onmessage = onDecMessage;
+      wk.onerror = function (ev) { failDecWorker(ev && ev.message); };
+      decPools[pool][idx] = wk;
+    }
+    return decPools[pool][idx];
+  }
+
+  function decryptData(hex, cb, low) {
+    if (decWorkerBroken || typeof Worker === 'undefined' || typeof TextDecoder === 'undefined') {
+      return decryptSync(hex, cb);
+    }
+    var pool = low ? 1 : 0;
+    var n = decPoolSize[pool];
+    var slices = Math.max(1, Math.min(n, Math.floor(hex.length / MIN_SLICE_HEX)));
+    // Slice length: a multiple of 64 hex chars, so each slice starts on a 24-byte boundary
+    var len = Math.ceil(hex.length / slices / 64) * 64;
     var id = ++decSeq;
-    decJobs[id] = { hex: hex, cb: cb };
-    decWorkers[slot].postMessage({ id: id, hex: hex, keyHex: KEY_HEX });
+    var count = Math.ceil(hex.length / len);
+    decJobs[id] = { hex: hex, cb: cb, pending: count, parts: new Array(count) };
+    try {
+      for (var p = 0; p < count; p++) {
+        getDecWorker(pool, p).postMessage({
+          id: id,
+          part: p,
+          keyHex: KEY_HEX,
+          hex: hex.substr(p * len, len),
+          last: p === count - 1
+        });
+      }
+    } catch (e) {
+      failDecWorker(e && e.message);
+    }
   }
 
   function randomHex(bytesCount) {
