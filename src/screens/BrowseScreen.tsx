@@ -22,7 +22,8 @@ type Area = 'bar' | 'menu' | 'grid';
 type Filter = 'tag' | 'year';
 
 const COLS = 9;
-const PAGE_SIZE = COLS * 6;
+// Portal answers are TripleDES-decrypted on the main thread: smaller pages block the TV less
+const PAGE_SIZE = COLS * 4;
 const ROW_HEIGHT = 286; // card + gap, see .browse-grid
 const IMAGE_ROWS_AHEAD = 3;
 const MENU_VISIBLE = 9;
@@ -174,7 +175,8 @@ export const BrowseScreen: React.FC<BrowseScreenProps> = ({
   const menuOptions = menuFilter === 'tag' ? tagOptions : yearOptions;
   const optionLabel = (f: Filter, v: string) => (f === 'tag' ? (v ? tagLabel(v) : 'Todos') : v || 'Todos');
 
-  // The option under the cursor is fetched right away (with priority), so OK finds it ready
+  // The option the cursor rests on is fetched ahead, so OK often finds it ready. Only that one:
+  // each answer is decrypted on the main thread, and prefetching every option made the menu lag
   useEffect(() => {
     if (area !== 'menu') return;
     const v = menuOptions[menuCursor];
@@ -182,7 +184,7 @@ export const BrowseScreen: React.FC<BrowseScreenProps> = ({
     const t = setTimeout(() => {
       if (menuFilter === 'tag') loadPage(root, v, year, 1).catch(() => {});
       else loadPage(root, tag, v, 1).catch(() => {});
-    }, 150);
+    }, 450);
     return () => clearTimeout(t);
   }, [area, menuCursor, menuFilter]);
 
@@ -190,12 +192,6 @@ export const BrowseScreen: React.FC<BrowseScreenProps> = ({
     setArea('menu');
     const at = Math.max(0, menuOptions.indexOf(menuFilter === 'tag' ? tag : year));
     setMenuCursor(at);
-    // Prefetch the first page of every option, nearest first, behind any real request
-    const order = menuOptions.map((v, i) => ({ v, d: Math.abs(i - at) })).sort((a, b) => a.d - b.d);
-    order.forEach(({ v }) => {
-      if (menuFilter === 'tag') loadPage(root, v, year, 1, true).catch(() => {});
-      else loadPage(root, tag, v, 1, true).catch(() => {});
-    });
   };
 
   useScreenKeys(key => {

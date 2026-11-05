@@ -96,6 +96,8 @@ const LIVE_WAIT_MS = 6000;
 const LIVE_FRESH_MS = 2 * 60 * 60 * 1000;
 const LIVE_REFRESH_AFTER_MS = 30 * 60 * 1000;
 let liveInFlight: Promise<any[]> | null = null;
+let lastKeyAt = 0;
+if (typeof window !== 'undefined') window.addEventListener('keydown', () => { lastKeyAt = Date.now(); }, true);
 
 function readLiveCatalog(): { at: number; items: any[] } | null {
   try {
@@ -136,6 +138,11 @@ class CatalogService {
   public refreshLiveInBackground(): void {
     const saved = readLiveCatalog();
     if (saved && Date.now() - saved.at < LIVE_REFRESH_AFTER_MS) return;
+    // The answers are decrypted on the main thread: start only while the remote rests
+    if (Date.now() - lastKeyAt < 4000) {
+      setTimeout(() => this.refreshLiveInBackground(), 4000);
+      return;
+    }
     fetchLiveCatalog(true).catch(e => console.log('[catalog] live refresh failed:', e && e.message));
   }
 
