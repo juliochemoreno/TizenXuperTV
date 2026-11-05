@@ -131,6 +131,59 @@
     return dec.toString(CryptoJS.enc.Utf8);
   }
 
+  // Decrypt + parse in a worker (js/magis-worker.js); the main thread only when workers fail
+  var decWorker = null;
+  var decWorkerBroken = false;
+  var decJobs = {};
+  var decSeq = 0;
+
+  function decryptSync(hex, cb) {
+    var data;
+    try {
+      data = JSON.parse(decryptBlob(hex));
+    } catch (e) {
+      return cb(e);
+    }
+    cb(null, data);
+  }
+
+  function failDecWorker(why) {
+    decWorkerBroken = true;
+    var jobs = decJobs;
+    decJobs = {};
+    try { if (decWorker) decWorker.terminate(); } catch (e) {}
+    decWorker = null;
+    console.log('[MagisClient] decrypt worker off, using main thread:', why);
+    for (var id in jobs) {
+      if (Object.prototype.hasOwnProperty.call(jobs, id)) {
+        (function (job) { setTimeout(function () { decryptSync(job.hex, job.cb); }, 0); })(jobs[id]);
+      }
+    }
+  }
+
+  function decryptData(hex, cb) {
+    if (decWorkerBroken || typeof Worker === 'undefined') return decryptSync(hex, cb);
+    if (!decWorker) {
+      try {
+        decWorker = new Worker('js/magis-worker.js');
+        decWorker.onmessage = function (e) {
+          var job = decJobs[e.data.id];
+          delete decJobs[e.data.id];
+          if (!job) return;
+          if (e.data.error) job.cb(new Error(e.data.error));
+          else job.cb(null, e.data.data);
+        };
+        decWorker.onerror = function (e) { failDecWorker(e && e.message); };
+      } catch (e) {
+        decWorker = null;
+        return failDecWorker(e && e.message);
+      }
+    }
+    var id = ++decSeq;
+    decJobs[id] = { hex: hex, cb: cb };
+    decWorker.postMessage({ id: id, hex: hex, keyHex: KEY_HEX });
+  }
+
   function randomHex(bytesCount) {
     var out = '';
     for (var i = 0; i < bytesCount * 2; i++) {
@@ -330,19 +383,13 @@
           }
 
           if (typeof resp.data === 'string' && resp.data !== '') {
-            var decText, decData;
-            try {
-              decText = decryptBlob(resp.data);
-            } catch (e) {
-              return tryHost();
-            }
-            try {
-              decData = JSON.parse(decText);
-            } catch (e) {
-              return tryHost();
-            }
-            finished = true;
-            return done(null, decData);
+            decryptData(resp.data, function (dErr, decData) {
+              if (finished) return;
+              if (dErr) return tryHost();
+              finished = true;
+              done(null, decData);
+            });
+            return;
           }
 
           finished = true;
