@@ -57,6 +57,8 @@ export const SearchModal: React.FC<SearchModalProps> = ({
 
   // Comprehensive list of ALL channels across all categories
   const allKnownChannels = useMemo(() => {
+    // Reading every cached category is expensive: only do it while the search is open
+    if (!isOpen) return [] as LiveChannel[];
     const list: LiveChannel[] = [...channels];
     const seen = new Set<string>(channels.map(c => String(c.id || c.code)));
 
@@ -94,7 +96,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
     });
 
     return list;
-  }, [channels]);
+  }, [channels, isOpen]);
 
   // Filtered Live Channels
   const filteredChannels = useMemo(() => {

@@ -112,7 +112,7 @@ const appVersion = (fs.readFileSync(path.resolve(__dirname, 'public/config.xml')
 
 export default defineConfig({
   define: { __APP_VERSION__: JSON.stringify(appVersion) },
-  plugins: [react(), streamProxyPlugin(), tvCompatPlugin()],
+  plugins: [react(), streamProxyPlugin(), tvCompatPlugin(appVersion)],
   base: './',
   server: {
     port: 5173,

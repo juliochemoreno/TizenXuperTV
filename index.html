@@ -5,6 +5,21 @@
   <meta name="referrer" content="no-referrer">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <title>XuperTV</title>
+  <style>
+    #xuper-splash { position: fixed; inset: 0; z-index: 100000; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      background: radial-gradient(circle at center, #12151e 0%, #07080b 100%); transition: opacity 0.35s ease-out;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+    #xuper-splash.is-hiding { opacity: 0; pointer-events: none; }
+    .xs-logo { width: 200px; height: 200px; object-fit: cover; border-radius: 44px; border: 2px solid rgba(56, 189, 248, 0.35); }
+    .xs-title { margin-top: 24px; font-size: 48px; font-weight: 900; letter-spacing: 2px; }
+    .xs-tizen { color: #38bdf8; } .xs-xuper { color: #ffffff; margin-left: 6px; } .xs-tv { color: #a855f7; margin-left: 8px; }
+    .xs-bar { position: relative; margin-top: 34px; width: 340px; height: 6px; border-radius: 6px; background: rgba(255, 255, 255, 0.12); overflow: hidden; }
+    .xs-fill { position: absolute; top: 0; bottom: 0; width: 40%; border-radius: 6px; background: linear-gradient(90deg, #38bdf8, #a855f7);
+      animation: xs-slide 1.1s ease-in-out infinite; }
+    @keyframes xs-slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(250%); } }
+    .xs-status { margin-top: 18px; font-size: 20px; color: rgba(255, 255, 255, 0.65); }
+    .xs-version { position: absolute; bottom: 34px; font-size: 15px; color: rgba(255, 255, 255, 0.35); letter-spacing: 1px; }
+  </style>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📺</text></svg>">
   <script src="$WEBAPIS/webapis/webapis.js"></script>
   <script src="js/hls.min.js"></script>
@@ -15,6 +30,14 @@
   <script src="data/catalog.js"></script>
 </head>
 <body style="margin:0;padding:0;background:#080b11;color:#fff;overflow:hidden;width:100%;height:100%;user-select:none;-webkit-user-select:none;">
+  <!-- Splash: plain HTML so it shows before any script loads; React removes it when the catalog is ready -->
+  <div id="xuper-splash">
+    <img class="xs-logo" src="assets/logo_3d.png" alt="">
+    <div class="xs-title"><span class="xs-tizen">TIZEN</span><span class="xs-xuper">XUPER</span><span class="xs-tv">TV</span></div>
+    <div class="xs-bar"><div class="xs-fill"></div></div>
+    <div class="xs-status">Iniciando…</div>
+    <div class="xs-version">v%APP_VERSION%</div>
+  </div>
   <div id="root"></div>
   <script type="module" src="/src/main.tsx"></script>
 </body>

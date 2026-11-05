@@ -1,4 +1,6 @@
 import React, { useRef, useEffect } from 'react';
+import { useRenderCount } from '../debug/renderCount';
+import { animateScroll } from '../utils/scrollHelper';
 import { VodItem } from '../types/vod';
 import { HistoryItem } from '../types/history';
 import { HeroShowcase } from '../components/vod/HeroShowcase';
@@ -55,6 +57,7 @@ export const DestacadosView: React.FC<DestacadosViewProps> = ({
   onActivateHistory,
   onActivateVod
 }) => {
+  useRenderCount('DestacadosView');
   const containerRef = useRef<HTMLDivElement>(null);
   const currentHero = heroItems[activeHeroIndex] || heroItems[0];
 
@@ -63,21 +66,12 @@ export const DestacadosView: React.FC<DestacadosViewProps> = ({
     if (!isFocusActive || !containerRef.current) return;
 
     if (focus.area === 'hero') {
-      if (typeof containerRef.current.scrollTo === 'function') {
-        containerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
-      } else {
-        containerRef.current.scrollTop = 0;
-      }
+      animateScroll(containerRef.current, 'top', 0, 200);
     } else if (focus.area === 'row') {
       const sections = containerRef.current.querySelectorAll('.content-section');
       if (sections[focus.rowIndex]) {
         const secEl = sections[focus.rowIndex] as HTMLElement;
-        const targetTop = Math.max(0, secEl.offsetTop - 24);
-        if (typeof containerRef.current.scrollTo === 'function') {
-          containerRef.current.scrollTo({ top: targetTop, behavior: 'smooth' });
-        } else {
-          containerRef.current.scrollTop = targetTop;
-        }
+        animateScroll(containerRef.current, 'top', Math.max(0, secEl.offsetTop - 24), 200);
       }
     }
   }, [isFocusActive, focus.area, focus.rowIndex]);

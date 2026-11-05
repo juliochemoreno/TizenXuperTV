@@ -18,6 +18,17 @@ class PlayerService {
   private currentVideoEl: HTMLVideoElement | null = null;
   private resolveTimer: any = null;
   private isFullscreen: boolean = false;
+  private lastChannel: LiveChannel | null = null;
+
+  constructor() {
+    // Coming back from the background when AVPlay could not be restored: reopen the live channel
+    window.addEventListener('xuper-avplay-restore-failed', () => {
+      if (!this.lastChannel || !this.currentVideoEl || !this.activeChannelCode) return;
+      const channel = this.lastChannel;
+      this.activeChannelCode = '';
+      this.playLivePreview(channel, this.currentVideoEl);
+    });
+  }
 
   public playLivePreview(channel: LiveChannel, videoEl: HTMLVideoElement | null) {
     channel = normalizeChannel(channel);
@@ -39,6 +50,7 @@ class PlayerService {
 
     this.currentVideoEl = videoEl;
     this.activeChannelCode = code;
+    this.lastChannel = channel;
 
     this.resolveTimer = setTimeout(() => {
       this.resolveTimer = null;

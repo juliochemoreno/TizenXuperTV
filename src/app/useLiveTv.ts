@@ -51,6 +51,19 @@ export function useLiveTv() {
       return null;
     }
   });
+  // Remember the selected category too, so the next start opens the category of the last channel
+  useEffect(() => {
+    const idx = liveTvFocus.selectedCatIndex;
+    if (idx === undefined) return;
+    try { localStorage.setItem('xuper_last_live_cat_idx', String(idx)); } catch {}
+  }, [liveTvFocus.selectedCatIndex]);
+
+  // Remember the last tuned channel whatever changed it (list, fullscreen up/down, drawer, search)
+  useEffect(() => {
+    if (!tunedLiveChannel) return;
+    try { localStorage.setItem('xuper_last_live_ch', JSON.stringify(tunedLiveChannel)); } catch {}
+  }, [tunedLiveChannel]);
+
   const [liveFavMap, setLiveFavMap] = useState<Record<string, boolean>>(() => {
     try {
       const raw = localStorage.getItem('xuper_live_favs_v1');
@@ -100,8 +113,6 @@ export function useLiveTv() {
   const toggleLiveFavorite = useCallback((channel: LiveChannel) => {
     const key = channelKey(channel);
     if (!key) return; // a channel without id/code/name cannot be a favorite
-    // TEMPORARY: trace who toggles favorites on the TV (see src/debug/tvDebug.ts)
-    console.log('[dbg fav toggle]', key, channel.name, (new Error().stack || '').split('\n').slice(2, 5).join(' | '));
     setLiveFavMap(prev => {
       const next = { ...prev, [key]: !prev[key] };
       try {

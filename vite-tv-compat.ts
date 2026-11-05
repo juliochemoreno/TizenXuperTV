@@ -66,7 +66,24 @@ export function addCssFallbacks(css: string): string {
   );
 }
 
-export function tvCompatPlugin(): Plugin {
+/**
+ * Moves the external scripts out of <head> into a small loader at the end of <body> that starts
+ * after the first paint, so the splash screen shows at once instead of a black screen while
+ * ~1.3 MB of scripts (portal data, hls, crypto) are parsed. Order is kept (one after another).
+ * webapis.js stays in <head>: it is tiny and the Tizen runtime resolves its $WEBAPIS path.
+ */
+function deferHeavyScripts(html: string): string {
+  const srcs: string[] = [];
+  html = html.replace(/<script\b[^>]*\ssrc="([^"]+)"[^>]*><\/script>\s*/g, (tag, src: string) => {
+    if (src.indexOf('$WEBAPIS') === 0) return tag;
+    srcs.push(src);
+    return '';
+  });
+  const loader = `<script>(function(){var s=${JSON.stringify(srcs)};function n(i){if(i>=s.length)return;var e=document.createElement('script');e.src=s[i];e.async=false;e.onload=e.onerror=function(){n(i+1)};document.body.appendChild(e)}requestAnimationFrame(function(){setTimeout(function(){n(0)},0)})})();</script>`;
+  return html.replace('</body>', loader + '\n</body>');
+}
+
+export function tvCompatPlugin(appVersion = 'dev'): Plugin {
   return {
     name: 'xuper-tv-compat',
     enforce: 'pre',
@@ -77,7 +94,9 @@ export function tvCompatPlugin(): Plugin {
     transformIndexHtml: {
       order: 'post',
       handler(html, ctx) {
+        html = html.replace(/%APP_VERSION%/g, appVersion);
         if (!ctx.bundle) return html; // dev server keeps ES modules
+        html = deferHeavyScripts(html);
         return html
           .replace(/<script type="module" crossorigin src=/g, '<script defer src=')
           .replace(/<link rel="modulepreload"[^>]*>\s*/g, '')

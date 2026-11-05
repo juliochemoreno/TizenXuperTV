@@ -3,7 +3,9 @@ import { LiveChannel, LiveCategory } from '../types/channel';
 import { playerService } from '../services/playerService';
 import { getMockChannelsForCategory } from '../services/mockLiveChannels';
 import { parentalService } from '../services/parentalService';
+import { useRenderCount } from '../debug/renderCount';
 import { channelKey, isSameChannel, normalizeChannels } from '../lib/channelKey';
+import { ChannelRow, CategoryRow } from '../components/live/LiveRows';
 import { OnScreenKeyboard, KbState, KB_INITIAL } from '../components/live/OnScreenKeyboard';
 import { normalizeText } from '../utils/normalizeText';
 
@@ -116,7 +118,7 @@ function filterLockedChannels(list: LiveChannel[], cats: LiveCategory[], activeI
 }
 const globalChannelMasterCache: Record<string, LiveChannel> = {};
 
-export const LiveTvView: React.FC<LiveTvViewProps> = ({
+const LiveTvViewInner: React.FC<LiveTvViewProps> = ({
   focus,
   isActiveTab = true,
   isFocusActive = true,
@@ -142,6 +144,7 @@ export const LiveTvView: React.FC<LiveTvViewProps> = ({
   onCategoriesLoaded,
   onSelectCategory
 }) => {
+  useRenderCount('LiveTvView');
   const savedCatIdx = useMemo(() => {
     try {
       const v = localStorage.getItem('xuper_last_live_cat_idx');
@@ -400,11 +403,12 @@ export const LiveTvView: React.FC<LiveTvViewProps> = ({
             localStorage.setItem('xuper_live_ch_cache_v2_' + catKey, JSON.stringify({ at: Date.now(), channels: chs }));
           } catch (e) {}
         }
-        setTimeout(prefetchStep, 100);
+        setTimeout(prefetchStep, 400);
       });
     };
 
-    const startTimer = setTimeout(prefetchStep, 300);
+    // Wait until the first screens are interactive before downloading every category
+    const startTimer = setTimeout(prefetchStep, 5000);
     return () => {
       isCancelled = true;
       clearTimeout(startTimer);
@@ -496,39 +500,18 @@ export const LiveTvView: React.FC<LiveTvViewProps> = ({
     }
   }, [activeCategory, favMap, categories, lockTick]);
 
-  // TEMPORARY (TV diagnostics): shape of the channels and how many look like favorites
+  // When channels load and nothing is tuned yet (first run), tune the saved channel or the first one.
+  // A channel that is already tuned keeps playing even if it belongs to another category:
+  // auto-tuning here used to replace the last watched channel on every start.
   useEffect(() => {
-    if (!channels.length || !(window as any).XuperPlatform?.isTizen) return;
-    const sample = channels.slice(0, 3).map(c => `${String(c.id)}|${String(c.code)}|${c.name}|key=${channelKey(c)}|fav=${!!favMap[channelKey(c)]}`);
-    const hits = channels.filter(c => !!favMap[channelKey(c)]).length;
-    console.log('[dbg chans]', activeCategory?.name, 'n=' + channels.length, 'favHits=' + hits, 'favKeys=' + Object.keys(favMap).length, sample.join(' ; '));
-  }, [channels, favMap]);
-
-  // When channels change or load, ensure an active channel is ALWAYS selected!
-  useEffect(() => {
-    if (channels.length > 0) {
-      const isAnyTuned = !!tunedChannel && channels.some(c => isSameChannel(c, tunedChannel));
-      if (!isAnyTuned) {
-        // Try restoring last saved channel from localStorage first
-        try {
-          const raw = localStorage.getItem('xuper_last_live_ch');
-          if (raw) {
-            const saved = JSON.parse(raw);
-            const foundInCat = channels.find(c => 
-              String(c.id) === String(saved.id) ||
-              (c.code && saved.code && String(c.code) === String(saved.code)) ||
-              (c.name && saved.name && c.name.trim().toLowerCase() === saved.name.trim().toLowerCase())
-            );
-            if (foundInCat) {
-              onTuneChannel(foundInCat);
-              return;
-            }
-          }
-        } catch {}
-        // Fallback: tune the first channel of this category so one channel is ALWAYS active!
-        onTuneChannel(channels[0]);
-      }
-    }
+    if (channels.length === 0 || tunedChannel) return;
+    let saved: LiveChannel | null = null;
+    try {
+      const raw = localStorage.getItem('xuper_last_live_ch');
+      if (raw) saved = JSON.parse(raw);
+    } catch {}
+    const foundInCat = saved ? channels.find(c => isSameChannel(c, saved)) : undefined;
+    onTuneChannel(foundInCat || channels[0]);
   }, [channels]);
 
   // ZERO-FLICKER: Stream playback depends ONLY on tunedChannel!
@@ -596,24 +579,16 @@ export const LiveTvView: React.FC<LiveTvViewProps> = ({
         </div>
 
         <div className="live-cat-vlist" ref={catListRef}>
-          {categories.map((cat, idx) => {
-            const isCurrentActive = selectedCatIndex === idx;
-            const isCursor = isFocusActive && focus.area === 'cats' && focus.catIndex === idx;
-
-            return (
-              <div
-                key={cat.id || idx}
-                className={`live-cat-vrow ${isCurrentActive ? 'is-active-cat' : ''} ${isCursor ? 'is-focused' : ''}`}
-                onClick={() => {
-                  if (onSelectCategory) {
-                    onSelectCategory(idx);
-                  }
-                }}
-              >
-                <span className="live-cat-vname">{cat.name}</span>
-              </div>
-            );
-          })}
+          {categories.map((cat, idx) => (
+            <CategoryRow
+              key={cat.id || idx}
+              cat={cat}
+              idx={idx}
+              active={selectedCatIndex === idx}
+              cursor={isFocusActive && focus.area === 'cats' && focus.catIndex === idx}
+              onSelect={onSelectCategory}
+            />
+          ))}
         </div>
       </aside>
 
@@ -636,51 +611,18 @@ export const LiveTvView: React.FC<LiveTvViewProps> = ({
                 : 'No hay canales disponibles en esta categoría'}
             </div>
           ) : (
-            channels.map((ch, idx) => {
-              const isCursorFocused = isFocusActive && focus.area === 'channels' && focus.channelIndex === idx;
-              const isChannelTuned = isSameChannel(tunedChannel, ch);
-              const isCurFav = !!favMap[channelKey(ch)];
-              const initials = String(ch.name || 'TV').trim().slice(0, 2).toUpperCase();
-
-              return (
-                <div
-                  key={ch.id || idx}
-                  className={`live-channel-card ${isCursorFocused ? 'is-focused' : ''} ${isChannelTuned ? 'is-active-channel' : ''}`}
-                  onClick={() => {
-                    if (isChannelTuned) {
-                      onEnterFullscreen(ch);
-                    } else {
-                      onTuneChannel(ch);
-                    }
-                  }}
-                >
-                  <div className="live-ch-num">{idx + 1 < 10 ? `0${idx + 1}` : idx + 1}</div>
-                  {ch.logo ? (
-                    <img
-                      className="live-ch-logo"
-                      src={ch.logo}
-                      alt={ch.name}
-                      onError={(e) => {
-                        (e.target as HTMLElement).style.display = 'none';
-                        const fallback = (e.target as HTMLElement).nextElementSibling as HTMLElement;
-                        if (fallback) fallback.style.display = 'flex';
-                      }}
-                    />
-                  ) : null}
-                  <div className="live-ch-avatar" style={{ display: ch.logo ? 'none' : 'flex' }}>
-                    {initials}
-                  </div>
-                  <div className="live-ch-info">
-                    <div className="live-ch-title">
-                      <span>{ch.name}</span>
-                      {isChannelTuned && <span className="live-playing-badge">▶ EN VIVO</span>}
-                      {isCurFav && <span className="live-fav-icon">★</span>}
-                    </div>
-                    <div className="live-ch-now">{ch.now || 'Transmisión en directo'}</div>
-                  </div>
-                </div>
-              );
-            })
+            channels.map((ch, idx) => (
+              <ChannelRow
+                key={ch.id || idx}
+                ch={ch}
+                idx={idx}
+                focused={isFocusActive && focus.area === 'channels' && focus.channelIndex === idx}
+                tuned={isSameChannel(tunedChannel, ch)}
+                fav={!!favMap[channelKey(ch)]}
+                onTune={onTuneChannel}
+                onFullscreen={onEnterFullscreen}
+              />
+            ))
           )}
         </div>
       </section>
@@ -1019,3 +961,6 @@ export const LiveTvView: React.FC<LiveTvViewProps> = ({
     </div>
   );
 };
+
+/** Memoized: App re-renders on every key, but this view only re-renders when its own props change */
+export const LiveTvView = React.memo(LiveTvViewInner);

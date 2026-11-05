@@ -12,7 +12,10 @@ import { playerService } from './services/playerService';
 import { favoritesService } from './services/favoritesService';
 import { useTvRemote, TvKey } from './hooks/useTvRemote';
 import { useScreenStack } from './hooks/useScreenStack';
+import { useStableHandlers } from './hooks/useStableHandlers';
+import { hideSplash, setSplashStatus } from './lib/splash';
 import { VodItem, VodEpisode } from './types/vod';
+import { LiveChannel, LiveCategory } from './types/channel';
 import { historyService } from './services/historyService';
 import { settingsService, applySubtitleChoice, PREFERRED_LANGUAGES, SUBTITLE_CHOICES } from './services/settingsService';
 import { getResumeTarget, startAtForEpisode } from './lib/vodResume';
@@ -170,6 +173,18 @@ export const App: React.FC = () => {
     }
   }
 
+  // Splash (index.html): stays until the catalog is on screen, never longer than 8 s
+  useEffect(() => {
+    setSplashStatus('Cargando catálogo…');
+    const fallback = setTimeout(hideSplash, 8000);
+    return () => clearTimeout(fallback);
+  }, []);
+  useEffect(() => {
+    if (featuredItems.length || movieItems.length || seriesItems.length) {
+      requestAnimationFrame(() => requestAnimationFrame(hideSplash));
+    }
+  }, [featuredItems, movieItems, seriesItems]);
+
   // Hero and rows for the active VOD tab
   const currentHeroItems = useMemo<VodItem[]>(
     () => heroItemsForTab(selectedTab, catalog),
@@ -288,6 +303,47 @@ export const App: React.FC = () => {
 
   useTvRemote({ onKey: handleKey });
 
+  // Live TV callbacks with a stable identity, so the memoized LiveTvView skips renders
+  // caused by keys handled elsewhere (VOD tabs, header, detail)
+  const liveViewHandlers = useStableHandlers({
+    onDrawerResults: (list: LiveChannel[]) => { drawerResultsRef.current = list; },
+    onTuneChannel: (ch: LiveChannel) => {
+      setTunedLiveChannel(ch);
+      try { localStorage.setItem('xuper_last_live_ch', JSON.stringify(ch)); } catch {}
+    },
+    onEnterFullscreen: (ch: LiveChannel) => {
+      if (ch) {
+        setTunedLiveChannel(ch);
+        try { localStorage.setItem('xuper_last_live_ch', JSON.stringify(ch)); } catch {}
+      }
+      setIsFullscreenLive(true);
+      triggerOsd();
+    },
+    onExitFullscreen: () => {
+      setIsFullscreenLive(false);
+      playerService.exitFullscreen();
+    },
+    onToggleFavorite: (ch: LiveChannel) => toggleLiveFavorite(ch),
+    onToggleChannelsDrawer: () => setShowFullscreenGuide(prev => !prev),
+    onToggleOsd: () => setShowFullscreenOsd(prev => !prev),
+    onChannelsLoaded: (chs: LiveChannel[]) => {
+      setLiveChannels(chs);
+      if (!tunedLiveChannel && chs.length > 0) {
+        setTunedLiveChannel(chs[0]);
+        try { localStorage.setItem('xuper_last_live_ch', JSON.stringify(chs[0])); } catch {}
+      }
+    },
+    onCategoriesLoaded: (cats: LiveCategory[]) => {
+      setLiveCategories(cats);
+    },
+    onSelectCategory: (idx: number) => {
+      guardLiveCat(idx, () => {
+        setLiveTvFocus(prev => ({ ...prev, selectedCatIndex: idx, catIndex: idx }));
+        try { localStorage.setItem('xuper_last_live_cat_idx', String(idx)); } catch {}
+      });
+    }
+  });
+
   // Check if current hero item is favorite
   const isHeroFav = useMemo(() => {
     const item = currentHeroItems[activeHeroIndex];
@@ -327,44 +383,9 @@ export const App: React.FC = () => {
           drawerArea={fullscreenGuideArea}
           drawerQuery={fullscreenQuery}
           drawerKb={fullscreenKb}
-          onDrawerResults={list => { drawerResultsRef.current = list; }}
           drawerCatIndex={fullscreenCatCursor}
           fullscreenFocusBtn="none"
-          onTuneChannel={ch => {
-            setTunedLiveChannel(ch);
-            try { localStorage.setItem('xuper_last_live_ch', JSON.stringify(ch)); } catch {}
-          }}
-          onEnterFullscreen={ch => {
-            if (ch) {
-              setTunedLiveChannel(ch);
-              try { localStorage.setItem('xuper_last_live_ch', JSON.stringify(ch)); } catch {}
-            }
-            setIsFullscreenLive(true);
-            triggerOsd();
-          }}
-          onExitFullscreen={() => {
-            setIsFullscreenLive(false);
-            playerService.exitFullscreen();
-          }}
-          onToggleFavorite={ch => toggleLiveFavorite(ch)}
-          onToggleChannelsDrawer={() => setShowFullscreenGuide(prev => !prev)}
-          onToggleOsd={() => setShowFullscreenOsd(prev => !prev)}
-          onChannelsLoaded={chs => {
-            setLiveChannels(chs);
-            if (!tunedLiveChannel && chs.length > 0) {
-              setTunedLiveChannel(chs[0]);
-              try { localStorage.setItem('xuper_last_live_ch', JSON.stringify(chs[0])); } catch {}
-            }
-          }}
-          onCategoriesLoaded={cats => {
-            setLiveCategories(cats);
-          }}
-          onSelectCategory={idx => {
-            guardLiveCat(idx, () => {
-              setLiveTvFocus(prev => ({ ...prev, selectedCatIndex: idx, catIndex: idx }));
-              try { localStorage.setItem('xuper_last_live_cat_idx', String(idx)); } catch {}
-            });
-          }}
+          {...liveViewHandlers}
         />
       </div>
 

@@ -104,6 +104,9 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
   const portalTrackRef = useRef<number>(0);
   const subsInitRef = useRef<boolean>(false);
   const audioPrefAppliedRef = useRef<boolean>(false);
+  const pendingSeekRef = useRef<{ target: number; until: number } | null>(null);
+  const seekTimerRef = useRef<any>(null);
+  const acceptTimeRef = useRef<(t: number) => boolean>(() => true);
   const toastTimerRef = useRef<any>(null);
   const settings = settingsService.get();
 
@@ -255,6 +258,7 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
       video.ontimeupdate = () => {
         if (!isCurrent()) return;
         const t = window.XuperAVPlay.currentTimeSec || 0;
+        if (!acceptTimeRef.current(t)) return;
         timeRef.current.t = t;
         setCurrentTime(t);
       };
@@ -366,6 +370,7 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
     const onPlay = () => setIsPlaying(true);
     const onPause = () => setIsPlaying(false);
     const onTimeUpdate = () => {
+      if (!acceptTimeRef.current(video.currentTime)) return;
       timeRef.current.t = video.currentTime;
       setCurrentTime(video.currentTime);
     };
@@ -417,6 +422,15 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
       } catch {}
     };
   }, [browserUrl]);
+
+  // Back from the background and AVPlay could not be restored: reopen at the same position
+  useEffect(() => {
+    const onRestoreFailed = () => {
+      if (useAvPlayRef.current) setRetryTick(t => t + 1);
+    };
+    window.addEventListener('xuper-avplay-restore-failed', onRestoreFailed);
+    return () => window.removeEventListener('xuper-avplay-restore-failed', onRestoreFailed);
+  }, []);
 
   // Load the selected subtitle file
   useEffect(() => {
@@ -479,17 +493,44 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
     }
   };
 
+  // Seeking: each press moves the timeline at once and adds to the previous target; the real
+  // seek (slow on AVPlay) is sent once, 350 ms after the last press. Until the player reaches the
+  // target, its time updates are ignored so the bar does not jump back.
   const seekBy = (delta: number) => {
     const d = timeRef.current.d;
-    const target = Math.max(0, Math.min(d > 0 ? d - 5 : Infinity, timeRef.current.t + delta));
-    if (useAvPlayRef.current && window.XuperAVPlay) {
-      window.XuperAVPlay.seekTo(target);
-    } else if (videoRef.current) {
-      videoRef.current.currentTime = target;
-    }
+    const pending = pendingSeekRef.current;
+    const base = pending ? pending.target : timeRef.current.t;
+    const target = Math.max(0, Math.min(d > 0 ? d - 5 : Infinity, base + delta));
+    pendingSeekRef.current = { target, until: 0 };
     timeRef.current.t = target;
     setCurrentTime(target);
+    if (seekTimerRef.current) clearTimeout(seekTimerRef.current);
+    seekTimerRef.current = setTimeout(() => {
+      seekTimerRef.current = null;
+      if (useAvPlayRef.current && window.XuperAVPlay) {
+        window.XuperAVPlay.seekTo(target);
+      } else if (videoRef.current) {
+        videoRef.current.currentTime = target;
+      }
+      if (pendingSeekRef.current) pendingSeekRef.current.until = Date.now() + 2500;
+    }, 350);
   };
+
+  // Player time updates while a seek is pending / settling
+  const acceptTime = (t: number): boolean => {
+    const pending = pendingSeekRef.current;
+    if (!pending) return true;
+    const reached = Math.abs(t - pending.target) < 3;
+    const expired = pending.until > 0 && Date.now() > pending.until;
+    if (reached || expired) {
+      pendingSeekRef.current = null;
+      return true;
+    }
+    return false;
+  };
+
+  acceptTimeRef.current = acceptTime;
+  useEffect(() => () => { if (seekTimerRef.current) clearTimeout(seekTimerRef.current); }, []);
 
   const chooseAudio = (idx: number) => {
     const opt = audioOptions[idx];

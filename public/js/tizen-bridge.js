@@ -785,6 +785,36 @@
     }
   };
 
+  // ---- Multitasking: Tizen requires AVPlay to be suspended in the background and restored on return.
+  // Without it the video plane stays black when the user comes back to the app.
+  if (isTizen) {
+    document.addEventListener('visibilitychange', function () {
+      if (!window.webapis || !webapis.avplay) return;
+      var state = '';
+      try { state = webapis.avplay.getState(); } catch (e) {}
+      if (document.hidden) {
+        if (state === 'PLAYING' || state === 'PAUSED' || state === 'READY') {
+          try { webapis.avplay.suspend(); window.XuperAVPlay._suspended = true; } catch (e) {}
+        }
+        console.log('[XuperAVPlay] app hidden, state=' + state);
+        return;
+      }
+      console.log('[XuperAVPlay] app visible, state=' + state + ' suspended=' + !!window.XuperAVPlay._suspended);
+      if (!window.XuperAVPlay._suspended) return;
+      window.XuperAVPlay._suspended = false;
+      var restored = false;
+      try {
+        webapis.avplay.restore();
+        window.XuperAVPlay.syncDisplayRect();
+        restored = true;
+      } catch (e) {
+        console.log('[XuperAVPlay] restore failed: ' + (e && e.message));
+      }
+      // Plan B: the app reopens the stream (live channel or VOD at the same position)
+      if (!restored) window.dispatchEvent(new CustomEvent('xuper-avplay-restore-failed'));
+    });
+  }
+
   window.__xuperCreateHls = function () {
     if (!window.Hls || !Hls.isSupported()) return null;
     return new Hls({
@@ -839,7 +869,8 @@
   };
 
   // Setup video element interception on DOM load
-  document.addEventListener('DOMContentLoaded', function () {
+  // Runs on DOMContentLoaded, or at once when the bridge is loaded after it (deferred loader)
+  function onDomReady() {
     window.XuperAVPlay.init();
 
     // Hook HTMLMediaElement.prototype.src to intercept non-HLS preview video assignments
@@ -947,7 +978,9 @@
       }
       return origSetAttribute.apply(this, arguments);
     };
-  });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', onDomReady);
+  else onDomReady();
 
   console.log('[XuperBridge] Tizen bridge ready. Platform:', window.XuperPlatform.name);
 })(window);
