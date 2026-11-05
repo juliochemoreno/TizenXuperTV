@@ -127,8 +127,12 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
     toastTimerRef.current = setTimeout(() => setOsdMessage(null), 1200);
   }, []);
 
+  // Back hides the overlay even while paused; any other key brings it back
+  const [osdDismissed, setOsdDismissed] = useState(false);
+
   // Trigger OSD visibility timeout (4.5 seconds)
   const triggerOsd = useCallback(() => {
+    setOsdDismissed(false);
     setShowOsd(true);
     if (osdTimerRef.current) clearTimeout(osdTimerRef.current);
     osdTimerRef.current = setTimeout(() => {
@@ -589,6 +593,22 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
         return;
       }
 
+      // Back hides the overlay first (closing an open menu), and leaves the player once it is hidden
+      if (isBack && !error) {
+        if (menu) {
+          setMenu(null);
+          triggerOsd();
+        } else if (osdVisibleRef.current) {
+          if (osdTimerRef.current) clearTimeout(osdTimerRef.current);
+          setShowOsd(false);
+          setOsdDismissed(true);
+          setFocusArea('center');
+        } else {
+          onClose();
+        }
+        return;
+      }
+
       // First key while the overlay is hidden only brings it back (OK still pauses at once)
       const wasHidden = !osdVisibleRef.current;
       triggerOsd();
@@ -677,7 +697,7 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
 
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
   const remainingTime = duration > 0 ? Math.max(0, duration - currentTime) : 0;
-  const osdVisible = showOsd || !isPlaying || !!error || !!menu || focusArea === 'controls';
+  const osdVisible = !!error || (!osdDismissed && (showOsd || !isPlaying || !!menu || focusArea === 'controls'));
   const osdVisibleRef = useRef(osdVisible);
   osdVisibleRef.current = osdVisible;
   const subtitleText = subIndex >= 0 ? cueAt(cues, currentTime) : '';
