@@ -2,7 +2,6 @@ import React, { useRef, useEffect, useState } from 'react';
 import { VodItem } from '../../types/vod';
 import { PosterCard } from './PosterCard';
 import { scrollHorizontalSlider } from '../../utils/scrollHelper';
-import { prefetchImages } from '../../utils/imagePrefetcher';
 
 interface ContentSliderProps {
   title: string;
@@ -42,11 +41,6 @@ const ContentSliderComponent: React.FC<ContentSliderProps> = ({
       const target = sliderRef.current.children[focusedIndex] as HTMLElement;
       scrollHorizontalSlider(sliderRef.current, target, focusedIndex, 48, 160);
 
-      // Pre-decode upcoming 4 card images in GPU texture memory
-      const nextUrls = items.slice(focusedIndex + 1, focusedIndex + 5).map(it =>
-        isWide ? (it.landscape || it.backdrop || it.poster) : (it.poster || it.landscape)
-      );
-      prefetchImages(nextUrls, 4);
     }
   }, [focusedIndex, items, isWide]);
 

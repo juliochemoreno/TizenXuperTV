@@ -14,6 +14,7 @@ import { useTvRemote, TvKey } from './hooks/useTvRemote';
 import { useScreenStack } from './hooks/useScreenStack';
 import { useStableHandlers } from './hooks/useStableHandlers';
 import { startSplash, completeSplashTask, preloadImages } from './lib/splash';
+import { optimizedImage } from './lib/imageCache';
 import { VodItem, VodEpisode } from './types/vod';
 import { LiveChannel, LiveCategory } from './types/channel';
 import { historyService } from './services/historyService';
@@ -194,12 +195,23 @@ export const App: React.FC = () => {
     // The first screen is complete once the hero and the visible posters are decoded
     const hero = currentHeroItems[0];
     const urls: string[] = hero ? [hero.backdrop || hero.landscape || hero.poster || ''] : [];
+    // First cards: the same card-size copies the rows will show (made once, then cached)
+    const cards: Promise<string>[] = [];
     currentRows.slice(0, 3).forEach(row => {
+      const history = row.type === 'history';
+      const wide = !!(row as { isWide?: boolean }).isWide;
       (row.items as { poster?: string; landscape?: string; backdrop?: string }[]).slice(0, 7).forEach(it => {
-        urls.push(it.poster || it.landscape || it.backdrop || '');
+        const url = history || !wide ? (it.poster || it.landscape || it.backdrop) : (it.landscape || it.backdrop || it.poster);
+        if (!url) return;
+        cards.push(history ? optimizedImage(url, 392, 221) : optimizedImage(url, wide ? 484 : 230, 340));
       });
     });
-    preloadImages(urls).then(() => completeSplashTask('images'));
+    // The first start makes the copies (a few seconds on the TV); later starts read them from the cache
+    const copies = Promise.race([
+      Promise.all(cards),
+      new Promise<string[]>(resolve => setTimeout(() => resolve([]), 6000))
+    ]);
+    copies.then(srcs => preloadImages(urls.concat(srcs))).then(() => completeSplashTask('images'));
   }, [currentRows, currentHeroItems, featuredItems, movieItems, seriesItems]);
   const getRowItemCount = useCallback((rowIdx: number): number => {
     return currentRows[rowIdx] ? currentRows[rowIdx].items.length : 0;

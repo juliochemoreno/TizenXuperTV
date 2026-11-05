@@ -1,5 +1,6 @@
 import React from 'react';
 import { VodItem } from '../../types/vod';
+import { useCardImage } from '../../lib/imageCache';
 
 interface PosterCardProps {
   item: VodItem;
@@ -23,6 +24,11 @@ const PosterCardComponent: React.FC<PosterCardProps> = ({
     ? (item.landscape || item.backdrop || item.poster || 'assets/placeholder_landscape.png')
     : (item.poster || item.landscape || item.backdrop || 'assets/placeholder_vertical.png');
 
+  // Card-size copy of the portal image; the placeholder shows under it until it is ready
+  const placeholder = isWide ? 'assets/placeholder_landscape.png' : 'assets/placeholder_vertical.png';
+  const cardSrc = useCardImage(posterUrl, isWide ? 484 : 230, isWide ? 340 : 340, showImage);
+  const background = cardSrc ? `url('${cardSrc}'), url('${placeholder}')` : `url('${placeholder}')`;
+
   const categoryName = item.isSeries ? 'Programa de TV' : 'Película';
   const genresStr = item.genres && item.genres.length ? item.genres.slice(0, 2).join(' · ') : (item.category || 'Cine');
   const wideSubtitle = `${categoryName} · ${genresStr}`;
@@ -41,7 +47,7 @@ const PosterCardComponent: React.FC<PosterCardProps> = ({
     >
       <div
         className="poster-card-img"
-        style={showImage ? { backgroundImage: `url('${posterUrl}')` } : undefined}
+        style={{ backgroundImage: background }}
       >
         {/* Top 10 Rank Number in clean Apple TV typography */}
         {rank !== undefined && rank > 0 && !isWide && (

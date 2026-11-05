@@ -1,5 +1,6 @@
 import React from 'react';
 import { HistoryItem } from '../../types/history';
+import { useCardImage } from '../../lib/imageCache';
 
 interface ContinueWatchingCardProps {
   item: HistoryItem;
@@ -13,6 +14,7 @@ const ContinueWatchingCardComponent: React.FC<ContinueWatchingCardProps> = ({
   onActivate
 }) => {
   const posterUrl = item.poster || 'assets/placeholder_landscape.png';
+  const cardSrc = useCardImage(posterUrl, 392, 221);
   const pct = item.duration > 0
     ? Math.min(100, Math.max(5, Math.round((item.position / item.duration) * 100)))
     : 45;
@@ -34,7 +36,7 @@ const ContinueWatchingCardComponent: React.FC<ContinueWatchingCardProps> = ({
     >
       <div
         className="cw-card-img"
-        style={{ backgroundImage: `url('${posterUrl}')` }}
+        style={{ backgroundImage: cardSrc ? `url('${cardSrc}'), url('assets/placeholder_landscape.png')` : `url('assets/placeholder_landscape.png')` }}
       >
         <div className="poster-brand-badge">
           <span>tv</span>
