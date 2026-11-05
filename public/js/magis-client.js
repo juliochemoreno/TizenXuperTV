@@ -347,6 +347,7 @@
     var hosts = hostOrder();
     var idx = 0;
     var finished = false;
+    var tStart = Date.now();
 
     function tryHost() {
       if (finished) return;
@@ -392,10 +393,14 @@
 
           if (typeof resp.data === 'string' && resp.data !== '') {
             if (opts.onNet) { var netDone = opts.onNet; opts.onNet = null; netDone(); }
+            var tNet = Date.now();
+            var kb = Math.round(resp.data.length / 2048);
             decryptData(resp.data, function (dErr, decData) {
               if (finished) return;
               if (dErr) return tryHost();
               finished = true;
+              // Timing per request (red = until the answer arrived, descifrado = worker), debug log
+              console.log('[portal] ' + path + ' ' + kb + 'KB red=' + (tNet - tStart) + 'ms descifrado=' + (Date.now() - tNet) + 'ms' + (opts.low ? ' (fondo)' : ''));
               done(null, decData);
             }, !!opts.low);
             return;
