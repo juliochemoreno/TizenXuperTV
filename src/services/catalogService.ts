@@ -83,13 +83,19 @@ function formatEpisodeDuration(raw: any): string {
 }
 
 // ---------- Live catalog
-// The home rows come from the portal (getNextColumns of each root). Each session shows the copy
-// saved by the previous one and refreshes it in the background, so starting never waits for the
-// network; the catalog is at most one session old. The bundled portal.js is the fallback.
+// The home rows come from the portal (getNextColumns of each root). The portal client sends one
+// request at a time (rate limit), so downloading the catalog delays everything else (live TV):
+//  - a saved copy younger than LIVE_FRESH_MS is shown at once;
+//  - an older one (or none) is downloaded during the loading screen, up to LIVE_WAIT_MS, then the
+//    saved copy or the bundled portal.js is shown (the late download is saved for the next start);
+//  - once the app is idle, and when it comes back to the front, a copy older than
+//    LIVE_REFRESH_AFTER_MS is downloaded again for the next start.
 const LIVE_KEY = 'xuper_live_catalog_v1';
 const LIVE_ROOTS = ['featured', 'movies', 'series', 'kids', 'anime', 'free'];
-const LIVE_FIRST_WAIT_MS = 5000;
+const LIVE_WAIT_MS = 6000;
+const LIVE_FRESH_MS = 2 * 60 * 60 * 1000;
 const LIVE_REFRESH_AFTER_MS = 30 * 60 * 1000;
+let liveInFlight: Promise<any[]> | null = null;
 
 function readLiveCatalog(): { at: number; items: any[] } | null {
   try {
@@ -100,25 +106,29 @@ function readLiveCatalog(): { at: number; items: any[] } | null {
   return null;
 }
 
-function homeRoot(root: string): Promise<any[]> {
+function homeRoot(root: string, low: boolean): Promise<any[]> {
   return new Promise((resolve, reject) => {
     const client = window.MagisClient;
     if (!client || typeof client.home !== 'function') return reject(new Error('no portal client'));
-    client.home(root, 1, (err: any, res: any) => (err ? reject(err) : resolve((res && res.items) || [])));
+    client.home(root, 1, (err: any, res: any) => (err ? reject(err) : resolve((res && res.items) || [])), { low });
   });
 }
 
 /** Downloads every root's rows; saves them when complete enough */
-function fetchLiveCatalog(): Promise<any[]> {
-  return LIVE_ROOTS.reduce<Promise<any[]>>(
-    (acc, root) => acc.then(all => homeRoot(root).then(items => all.concat(items), () => all)),
-    Promise.resolve([])
-  ).then(items => {
+/** `low`: background refresh, behind every request the user is waiting for */
+function fetchLiveCatalog(low = false): Promise<any[]> {
+  if (liveInFlight) return liveInFlight;
+  const t0 = Date.now();
+  liveInFlight = Promise.all(LIVE_ROOTS.map(root => homeRoot(root, low).catch(() => [] as any[]))).then(lists => {
+    const items = ([] as any[]).concat(...lists);
+    console.log(`[catalog] live catalog: ${items.length} items in ${Date.now() - t0} ms`);
     if (items.length < 100) throw new Error(`live catalog too small (${items.length})`);
     try { localStorage.setItem(LIVE_KEY, JSON.stringify({ at: Date.now(), items })); } catch {}
     console.log(`[catalog] live catalog saved: ${items.length} items`);
     return items;
   });
+  liveInFlight.then(() => { liveInFlight = null; }, () => { liveInFlight = null; });
+  return liveInFlight;
 }
 
 class CatalogService {
@@ -126,7 +136,7 @@ class CatalogService {
   public refreshLiveInBackground(): void {
     const saved = readLiveCatalog();
     if (saved && Date.now() - saved.at < LIVE_REFRESH_AFTER_MS) return;
-    fetchLiveCatalog().catch(e => console.log('[catalog] live refresh failed:', e && e.message));
+    fetchLiveCatalog(true).catch(e => console.log('[catalog] live refresh failed:', e && e.message));
   }
 
   private cache: {
@@ -148,15 +158,17 @@ class CatalogService {
   }> {
     if (this.cache) return this.cache;
 
-    // 0. Live catalog from the portal: the copy saved by the last session, or a fresh one
-    //    (the first start waits up to LIVE_FIRST_WAIT_MS, then falls back to the bundled copy)
+    // 0. Live catalog: a recent saved copy, else fresh from the portal, else any saved copy
     const saved = readLiveCatalog();
-    if (saved) return this.categorize(saved.items.map((it: any, idx: number) => normalizeItem(it, idx)));
+    if (saved && Date.now() - saved.at < LIVE_FRESH_MS) {
+      return this.categorize(saved.items.map((it: any, idx: number) => normalizeItem(it, idx)));
+    }
     const fresh = await Promise.race([
       fetchLiveCatalog().catch(() => null),
-      new Promise<null>(resolve => setTimeout(() => resolve(null), LIVE_FIRST_WAIT_MS))
+      new Promise<null>(resolve => setTimeout(() => resolve(null), LIVE_WAIT_MS))
     ]);
-    if (fresh && fresh.length) return this.categorize(fresh.map((it: any, idx: number) => normalizeItem(it, idx)));
+    const live = fresh && fresh.length ? fresh : (saved ? saved.items : []);
+    if (live.length) return this.categorize(live.map((it: any, idx: number) => normalizeItem(it, idx)));
 
     // 1. Check window.XUPERTV_PORTAL (rich bundled portal catalog with 610 items)
     if (typeof window !== 'undefined' && window.XUPERTV_PORTAL && Array.isArray(window.XUPERTV_PORTAL.items) && window.XUPERTV_PORTAL.items.length > 0) {

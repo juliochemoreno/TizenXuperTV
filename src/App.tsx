@@ -189,10 +189,16 @@ export const App: React.FC = () => {
 
   // Splash (index.html): a real loading screen, see lib/splash.ts
   useEffect(() => { startSplash(); }, []);
-  // Keep the live VOD catalog fresh for the next start, once the first screen is idle
+  // Refresh the saved live catalog for the next start: once the first screen is idle, and when a
+  // TV left on brings the app back to the front
   useEffect(() => {
-    const t = setTimeout(() => catalogService.refreshLiveInBackground(), 20000);
-    return () => clearTimeout(t);
+    const t = setTimeout(() => catalogService.refreshLiveInBackground(), 15000);
+    const onVisible = () => { if (!document.hidden) catalogService.refreshLiveInBackground(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearTimeout(t);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, []);
   const splashImagesRef = useRef(false);
   useEffect(() => {
@@ -213,10 +219,11 @@ export const App: React.FC = () => {
         cards.push(history ? optimizedImage(url, 392, 221) : optimizedImage(url, wide ? 484 : 230, 340));
       });
     });
-    // The first start makes the copies (a few seconds on the TV); later starts read them from the cache
+    // Later starts read the copies from the cache at once; the first start does not wait for them
+    // to be made (the placeholder shows until each one is ready)
     const copies = Promise.race([
       Promise.all(cards),
-      new Promise<string[]>(resolve => setTimeout(() => resolve([]), 6000))
+      new Promise<string[]>(resolve => setTimeout(() => resolve([]), 1500))
     ]);
     copies.then(srcs => preloadImages(urls.concat(srcs))).then(() => completeSplashTask('images'));
   }, [currentRows, currentHeroItems, featuredItems, movieItems, seriesItems]);

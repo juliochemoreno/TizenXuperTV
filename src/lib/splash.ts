@@ -34,6 +34,7 @@ function hideSplash(): void {
   if (hidden) return;
   hidden = true;
   fill(100);
+  console.log(`[startup] splash hidden at ${Math.round(performance.now())} ms (done: ${Array.from(done).join(', ') || 'none'})`);
   const el = document.getElementById('xuper-splash');
   if (!el) return;
   // Let the bar reach 100% before fading out

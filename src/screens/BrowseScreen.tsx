@@ -16,12 +16,14 @@ interface BrowseScreenProps {
   onOpenVod: (item: VodItem) => void;
 }
 
-type Area = 'tags' | 'years' | 'grid';
+type Area = 'bar' | 'menu' | 'grid';
+type Filter = 'tag' | 'year';
 
 const COLS = 9;
 const PAGE_SIZE = COLS * 6;
 const ROW_HEIGHT = 286; // card + gap, see .browse-grid
 const IMAGE_ROWS_AHEAD = 3;
+const MENU_VISIBLE = 9;
 
 const ROOT_LABEL: Record<BrowseRoot, string> = {
   featured: 'Destacados',
@@ -84,7 +86,8 @@ export const BrowseScreen: React.FC<BrowseScreenProps> = ({
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [area, setArea] = useState<Area>('grid');
-  const [chip, setChip] = useState(0);
+  const [barIndex, setBarIndex] = useState(0); // 0 = genre, 1 = year
+  const [menuCursor, setMenuCursor] = useState(0);
   const [cursor, setCursor] = useState(0);
   const pageRef = useRef(0);
   const loadingRef = useRef(false);
@@ -145,18 +148,21 @@ export const BrowseScreen: React.FC<BrowseScreenProps> = ({
     if (gridRef.current) gridRef.current.style.transform = `translateY(${-Math.max(0, focusRow - 1) * ROW_HEIGHT}px)`;
   }, [focusRow]);
 
-  const tagChips = ['', ...tags];
-  const yearChips = ['', ...years];
+  const tagOptions = ['', ...tags];
+  const yearOptions = ['', ...years];
+  const menuFilter: Filter = barIndex === 0 ? 'tag' : 'year';
+  const menuOptions = menuFilter === 'tag' ? tagOptions : yearOptions;
+  const optionLabel = (f: Filter, v: string) => (f === 'tag' ? (v ? tagLabel(v) : 'Todos') : v || 'Todos');
 
-  const openChips = (which: 'tags' | 'years') => {
-    setArea(which);
-    const list = which === 'tags' ? tagChips : yearChips;
-    setChip(Math.max(0, list.indexOf(which === 'tags' ? tag : year)));
+  const openMenu = () => {
+    setArea('menu');
+    setMenuCursor(Math.max(0, menuOptions.indexOf(menuFilter === 'tag' ? tag : year)));
   };
 
   useScreenKeys(key => {
     if (key === 'back') {
-      if (area !== 'grid' && items.length) setArea('grid');
+      if (area === 'menu') setArea('bar');
+      else if (area === 'bar' && items.length) setArea('grid');
       else onClose();
       return;
     }
@@ -165,7 +171,7 @@ export const BrowseScreen: React.FC<BrowseScreenProps> = ({
       else if (key === 'right') setCursor(c => (c % COLS === COLS - 1 || c + 1 >= items.length ? c : c + 1));
       else if (key === 'down') setCursor(c => (c + COLS < items.length ? c + COLS : c));
       else if (key === 'up') {
-        if (cursor < COLS) openChips('years');
+        if (cursor < COLS) setArea('bar');
         else setCursor(c => c - COLS);
       } else if (key === 'enter') {
         const it = items[cursor];
@@ -173,51 +179,67 @@ export const BrowseScreen: React.FC<BrowseScreenProps> = ({
       }
       return;
     }
-    const list = area === 'tags' ? tagChips : yearChips;
-    if (key === 'left') setChip(c => Math.max(0, c - 1));
-    else if (key === 'right') setChip(c => Math.min(list.length - 1, c + 1));
-    else if (key === 'up' && area === 'years') openChips('tags');
-    else if (key === 'down') {
-      if (area === 'tags') openChips('years');
-      else if (items.length) setArea('grid');
-    } else if (key === 'enter') {
-      const value = list[chip] || '';
-      if (area === 'tags') setTag(value);
+    if (area === 'bar') {
+      if (key === 'left') setBarIndex(0);
+      else if (key === 'right') setBarIndex(1);
+      else if (key === 'down' && items.length) setArea('grid');
+      else if (key === 'enter') openMenu();
+      return;
+    }
+    // Open menu: ▲ ▼ choose, OK applies, ◄ / Back close
+    if (key === 'up') setMenuCursor(c => Math.max(0, c - 1));
+    else if (key === 'down') setMenuCursor(c => Math.min(menuOptions.length - 1, c + 1));
+    else if (key === 'left') setArea('bar');
+    else if (key === 'enter') {
+      const value = menuOptions[menuCursor] || '';
+      if (menuFilter === 'tag') setTag(value);
       else setYear(value);
       setArea('grid');
     }
   }, isTop && !hidden);
 
-  const chipRow = (which: 'tags' | 'years', list: string[], current: string, label: (v: string) => string) => (
-    <div className="browse-chips">
-      <div
-        className="browse-chips-track"
-        style={{ transform: `translateX(${area === which ? -Math.max(0, chip - 4) * 150 : 0}px)` }}
-      >
-        {list.map((v, i) => (
-          <div
-            key={v || 'all'}
-            className={`browse-chip ${v === current ? 'is-selected' : ''} ${area === which && i === chip ? 'is-focused' : ''}`}
-          >
-            {label(v)}
-          </div>
-        ))}
-      </div>
+  const menuStart = Math.min(Math.max(0, menuCursor - Math.floor(MENU_VISIBLE / 2)), Math.max(0, menuOptions.length - MENU_VISIBLE));
+
+  const filterButton = (index: number, f: Filter, value: string) => (
+    <div className={`browse-filter ${area !== 'grid' && barIndex === index ? 'is-focused' : ''} ${value ? 'is-active' : ''}`}>
+      <span className="browse-filter-name">{f === 'tag' ? 'Género' : 'Año'}</span>
+      <span className="browse-filter-value">{optionLabel(f, value)}</span>
+      <svg className="browse-filter-caret" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.5">
+        <path d="M6 9l6 6 6-6" />
+      </svg>
+      {area === 'menu' && barIndex === index && (
+        <div className="browse-menu">
+          {menuOptions.slice(menuStart, menuStart + MENU_VISIBLE).map((v, i) => {
+            const idx = menuStart + i;
+            return (
+              <div key={v || 'all'} className={`browse-menu-row ${idx === menuCursor ? 'is-focused' : ''}`}>
+                <span className="browse-menu-check">{v === value ? '✓' : ''}</span>
+                <span>{optionLabel(f, v)}</span>
+              </div>
+            );
+          })}
+          {menuOptions.length > MENU_VISIBLE && (
+            <div className="browse-menu-more">{menuCursor + 1} / {menuOptions.length}</div>
+          )}
+        </div>
+      )}
     </div>
   );
 
-  const sectionTitle = [title || ROOT_LABEL[root], tag ? tagLabel(tag) : '', year].filter(Boolean).join(' · ');
+  const sectionTitle = title || ROOT_LABEL[root];
 
   return (
     <div className="browse-screen" style={hidden ? { display: 'none' } : undefined}>
       <div className="browse-head">
         <div className="browse-title">{sectionTitle}</div>
+        <div className="browse-filters">
+          {filterButton(0, 'tag', tag)}
+          {filterButton(1, 'year', year)}
+        </div>
         <div className="browse-count">
           {total ? `${total.toLocaleString('es')} títulos` : loading ? 'Cargando…' : ''}
         </div>
       </div>
-      {chipRow('tags', tagChips, tag, v => (v ? tagLabel(v) : 'Todos los géneros'))}
-      {chipRow('years', yearChips, year, v => v || 'Todos los años')}
 
       <div className="browse-body">
         <div className="browse-grid" ref={gridRef}>

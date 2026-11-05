@@ -17,11 +17,8 @@ const GIVE_UP_AFTER = 6; // consecutive failures before using original URLs for 
 
 // Classic worker from a blob: no extra build entry, and the packaged app has no module workers issue
 const WORKER_SRC = `
-var queue = [], busy = 0, MAX = 3;
-onmessage = function (e) { queue.push(e.data); pump(); };
-function pump() { while (busy < MAX && queue.length) run(queue.shift()); }
+onmessage = function (e) { run(e.data); };
 function run(job) {
-  busy++;
   fetch(job.src).then(function (r) {
     if (!r.ok) throw new Error('http ' + r.status);
     return r.blob();
@@ -45,13 +42,36 @@ function run(job) {
     postMessage(res);
   }).catch(function (err) {
     postMessage({ id: job.id, error: String(err) });
-  }).then(function () { busy--; pump(); });
+  });
 }
 `;
 
 const memory = new Map<string, string>(); // key -> object URL (or the original URL)
 const pending = new Map<string, Promise<string>>();
 const callbacks = new Map<number, (res: any) => void>();
+// One image at a time, and only while the remote is idle: decoding a 1920 px image takes the
+// TV's CPU for a while, and navigation must never wait for it
+const KEY_IDLE_MS = 700;
+const jobs: { id: number; src: string; w: number; h: number }[] = [];
+let workerBusy = false;
+let lastKeyAt = 0;
+let pumpTimer: ReturnType<typeof setTimeout> | null = null;
+if (typeof window !== 'undefined') {
+  window.addEventListener('keydown', () => { lastKeyAt = Date.now(); }, true);
+}
+
+function pump(): void {
+  if (workerBusy || !jobs.length || pumpTimer) return;
+  const wait = lastKeyAt + KEY_IDLE_MS - Date.now();
+  if (wait > 0) {
+    pumpTimer = setTimeout(() => { pumpTimer = null; pump(); }, wait);
+    return;
+  }
+  const wk = getWorker();
+  if (!wk) return;
+  workerBusy = true;
+  wk.postMessage(jobs.pop()); // newest first: the cards on screen now
+}
 let worker: Worker | null = null;
 let jobId = 0;
 let failures = 0;
@@ -112,9 +132,11 @@ function getWorker(): Worker | null {
   try {
     worker = new Worker(URL.createObjectURL(new Blob([WORKER_SRC], { type: 'text/javascript' })));
     worker.onmessage = e => {
+      workerBusy = false;
       const cb = callbacks.get(e.data.id);
       callbacks.delete(e.data.id);
       if (cb) cb(e.data);
+      pump();
     };
   } catch {
     disabled = true;
@@ -130,7 +152,8 @@ function shrink(url: string, w: number, h: number): Promise<any> {
   return new Promise(resolve => {
     const id = ++jobId;
     callbacks.set(id, resolve);
-    wk.postMessage({ id, src, w, h });
+    jobs.push({ id, src, w, h });
+    pump();
   });
 }
 

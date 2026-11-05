@@ -4333,60 +4333,112 @@ html.xuper-vod-avplay .app-root,
 }
 
 .browse-head {
+  position: relative;
+  z-index: 2;
   display: flex;
-  align-items: baseline;
-  gap: 20px;
-  padding: 40px 60px 14px;
+  align-items: center;
+  gap: 28px;
+  padding: 44px 60px 0;
 }
 
 .browse-title {
-  font-size: 38px;
+  font-size: 40px;
   font-weight: 800;
+  letter-spacing: -0.5px;
+}
+
+.browse-filters {
+  display: flex;
+  gap: 14px;
+}
+
+.browse-filter {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 18px 10px 22px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 2px solid transparent;
+  transition: transform 0.15s ease-out, background 0.15s ease-out;
+}
+
+.browse-filter.is-active {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.browse-filter.is-focused {
+  background: #ffffff;
+  color: #000000;
+  transform: scale(1.05);
+}
+
+.browse-filter-name {
+  font-size: 16px;
+  font-weight: 600;
+  opacity: 0.6;
+}
+
+.browse-filter-value {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.browse-filter-caret {
+  opacity: 0.7;
 }
 
 .browse-count {
+  margin-left: auto;
   font-size: 20px;
   color: rgba(255, 255, 255, 0.55);
 }
 
-.browse-chips {
-  overflow: hidden;
-  padding: 6px 60px;
+.browse-menu {
+  position: absolute;
+  top: calc(100% + 12px);
+  left: 0;
+  min-width: 280px;
+  padding: 10px;
+  border-radius: 18px;
+  background: rgba(28, 28, 30, 0.97);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.6);
+  color: #ffffff;
 }
 
-.browse-chips-track {
+.browse-menu-row {
   display: flex;
-  gap: 12px;
-  transition: transform 0.2s ease-out;
-}
-
-.browse-chip {
-  flex: 0 0 auto;
-  padding: 9px 20px;
-  border-radius: 22px;
-  font-size: 18px;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  border-radius: 12px;
+  font-size: 20px;
   font-weight: 600;
   white-space: nowrap;
-  background: rgba(255, 255, 255, 0.08);
-  border: 2px solid transparent;
-  color: rgba(255, 255, 255, 0.8);
 }
 
-.browse-chip.is-selected {
-  background: rgba(255, 255, 255, 0.9);
+.browse-menu-row.is-focused {
+  background: #ffffff;
   color: #000000;
 }
 
-.browse-chip.is-focused {
-  border-color: #ffffff;
-  transform: scale(1.06);
+.browse-menu-check {
+  width: 20px;
+  font-weight: 800;
+}
+
+.browse-menu-more {
+  padding: 8px 14px 2px;
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.45);
 }
 
 .browse-body {
   position: absolute;
   left: 0;
   right: 0;
-  top: 230px;
+  top: 140px;
   bottom: 0;
   overflow: hidden;
   padding: 10px 60px 0;

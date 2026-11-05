@@ -222,15 +222,16 @@
   }
 
   var queue = [];
+  var lowQueue = []; // background work (catalog refresh): runs only when nothing else waits
   var lastCallAt = 0;
 
-  function enqueue(fn) {
-    queue.push(fn);
+  function enqueue(fn, low) {
+    (low ? lowQueue : queue).push(fn);
     drain();
   }
 
   function drain() {
-    if (!session.busy && queue.length) {
+    if (!session.busy && (queue.length || lowQueue.length)) {
       var delay = lastCallAt + RATE_MS - Date.now();
       if (delay > 0) {
         session.busy = true;
@@ -240,7 +241,7 @@
         }, delay);
         return;
       }
-      var task = queue.shift();
+      var task = queue.length ? queue.shift() : lowQueue.shift();
       session.busy = true;
       lastCallAt = Date.now();
       task(function () {
@@ -411,7 +412,7 @@
         }
         callback(err, res);
       });
-    });
+    }, !!opts.low);
   }
 
   var sessionStarting = false;
@@ -1367,11 +1368,14 @@
   }
 
   var treeCache = {};
-  function home(root, pageNum, callback) {
+  // opts.low: background refresh, waits behind every other request
+  function home(root, pageNum, callback, opts) {
     if (typeof pageNum === 'function') {
+      opts = callback;
       callback = pageNum;
       pageNum = 1;
     }
+    opts = opts || {};
     root = ROOT_CODES[root] ? root : 'movies';
     pageNum = Math.max(1, parseInt(pageNum, 10) || 1);
     var cacheKey = root + ':' + pageNum;
@@ -1386,7 +1390,7 @@
         pageNum: pageNum,
         pageSize: 60,
         version: ''
-      }, function (cErr, cRes) {
+      }, { low: !!opts.low }, function (cErr, cRes) {
         if (cErr) return callback(cErr);
         var recList = cRes && cRes.recommendList || [];
         var items = [];
