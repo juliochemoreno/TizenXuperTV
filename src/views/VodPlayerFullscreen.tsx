@@ -97,8 +97,8 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
   // Remote focus: the three center buttons (-10 / play / +10) or the bottom-right buttons
   const [focusArea, setFocusArea] = useState<'center' | 'timeline' | 'controls'>('center');
   const [centerIndex, setCenterIndex] = useState<number>(1);
-  const [ctrlIndex, setCtrlIndex] = useState<number>(0); // 0 = subtitles, 1 = audio
-  const [menu, setMenu] = useState<null | 'subs' | 'audio'>(null);
+  const [ctrlIndex, setCtrlIndex] = useState<number>(0); // 0 = subtitles, 1 = audio, 2 = episodes
+  const [menu, setMenu] = useState<null | 'subs' | 'audio' | 'episodes'>(null);
   const [menuCursor, setMenuCursor] = useState<number>(0);
   const [toastId, setToastId] = useState<number>(0);
   const portalTrackRef = useRef<number>(0);
@@ -112,6 +112,9 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
 
   const epIndex = episode ? episodes.findIndex(ep => String(ep.id) === String(episode.id)) : -1;
   const nextEpisode = epIndex !== -1 && epIndex + 1 < episodes.length ? episodes[epIndex + 1] : undefined;
+  // Episode shelf (like Apple TV): the other episodes of the season, without leaving the player
+  const hasEpisodeShelf = !isTrailer && !!onPlayEpisode && episodes.length > 1;
+  const ctrlCount = hasEpisodeShelf ? 3 : 2;
   const epNumber = episode ? (episode.number || epIndex + 1 || 1) : 0;
 
   const title = isTrailer ? `${item.title} — Tráiler Oficial` : item.title;
@@ -613,6 +616,19 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
       const wasHidden = !osdVisibleRef.current;
       triggerOsd();
 
+      // Episode shelf: ◄ ► choose, OK plays, ▲ closes
+      if (menu === 'episodes') {
+        if (isLeft) setMenuCursor(c => Math.max(0, c - 1));
+        else if (isRight) setMenuCursor(c => Math.min(episodes.length - 1, c + 1));
+        else if (isUp) setMenu(null);
+        else if (isEnter) {
+          const ep = episodes[menuCursor];
+          setMenu(null);
+          if (ep && onPlayEpisode && menuCursor !== epIndex) onPlayEpisode(ep);
+        }
+        return;
+      }
+
       // Audio / subtitles menu
       if (menu) {
         if (isBack || isLeft) setMenu(null);
@@ -647,9 +663,12 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
       if (focusArea === 'controls') {
         if (isBack) setFocusArea('center');
         else if (isUp) setFocusArea('timeline');
-        else if (isLeft) setCtrlIndex(0);
-        else if (isRight) setCtrlIndex(1);
-        else if (isEnter) {
+        else if (isLeft) setCtrlIndex(i => Math.max(0, i - 1));
+        else if (isRight) setCtrlIndex(i => Math.min(ctrlCount - 1, i + 1));
+        else if (isEnter && ctrlIndex === 2) {
+          setMenu('episodes');
+          setMenuCursor(Math.max(0, epIndex));
+        } else if (isEnter) {
           const which = ctrlIndex === 0 ? 'subs' : 'audio';
           const rows = which === 'subs' ? subRows : audioRows;
           const current = which === 'subs' ? subIndex : audioIndex;
@@ -793,8 +812,16 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
                     <path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2" />
                   </svg>
                 </div>
+                {hasEpisodeShelf && (
+                  <div className={`vp-ctrl ${focusArea === 'controls' && ctrlIndex === 2 ? 'is-focused' : ''} ${menu === 'episodes' ? 'is-on' : ''}`} title="Episodios">
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2">
+                      <rect x="3" y="4" width="18" height="12" rx="2" />
+                      <path d="M7 20h10" />
+                    </svg>
+                  </div>
+                )}
 
-                {menu && (
+                {menu && menu !== 'episodes' && (
                   <div className={`vp-menu ${menu === 'audio' ? 'is-audio' : ''}`}>
                     <div className="vp-menu-title">{menu === 'subs' ? 'Subtítulos' : 'Audio'}</div>
                     {menuRows.length === 0 && <div className="vp-menu-empty">No hay opciones</div>}
@@ -812,6 +839,27 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
               </div>
             )}
           </div>
+
+          {menu === 'episodes' && (
+            <div className="vp-episodes">
+              <div className="vp-menu-title">{seasonNumber ? `Temporada ${seasonNumber}` : 'Episodios'}</div>
+              <div className="vp-episodes-track" style={{ transform: `translateX(${-Math.max(0, menuCursor - 2) * 340}px)` }}>
+                {episodes.map((ep, i) => {
+                  const current = i === epIndex;
+                  return (
+                    <div key={ep.id} className={`vp-ep-card ${i === menuCursor ? 'is-focused' : ''} ${current ? 'is-current' : ''}`}>
+                      <div className="vp-ep-thumb" style={{ backgroundImage: `url('${ep.picture || item.backdrop || item.landscape || 'assets/placeholder_landscape.png'}')` }}>
+                        {current && <span className="vp-ep-now">Reproduciendo</span>}
+                        {current && <div className="vp-ep-progress"><div style={{ width: `${progressPercent}%` }} /></div>}
+                      </div>
+                      <div className="vp-ep-num">Episodio {ep.number || i + 1}</div>
+                      <div className="vp-ep-title">{ep.title || ep.name || `Capítulo ${i + 1}`}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           <div className="vp-progress-row">
             <span className={`vp-time ${focusArea === 'timeline' && !menu ? 'is-focused' : ''}`}>{formatTime(currentTime)}</span>

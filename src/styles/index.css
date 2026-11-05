@@ -4169,3 +4169,94 @@ html.xuper-vod-avplay .app-root,
   color: #ffffff;
   font-weight: 800;
 }
+
+/* Episode shelf in the VOD player */
+.vp-episodes {
+  margin: 0 0 22px;
+  overflow: hidden;
+}
+
+.vp-episodes .vp-menu-title {
+  padding: 0 0 12px;
+  font-size: 18px;
+}
+
+.vp-episodes-track {
+  display: flex;
+  gap: 20px;
+  padding: 10px 6px 6px;
+  transition: transform 0.25s ease-out;
+}
+
+.vp-ep-card {
+  flex: 0 0 320px;
+  width: 320px;
+  margin-right: 0;
+  opacity: 0.75;
+  transition: transform 0.18s ease-out, opacity 0.18s ease-out;
+}
+
+.vp-ep-card.is-focused {
+  opacity: 1;
+  transform: scale(1.05);
+}
+
+.vp-ep-thumb {
+  position: relative;
+  height: 180px;
+  border-radius: 14px;
+  background-color: #1c1c1e;
+  background-size: cover;
+  background-position: center;
+  border: 3px solid transparent;
+}
+
+.vp-ep-card.is-focused .vp-ep-thumb {
+  border-color: #ffffff;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.55);
+}
+
+.vp-ep-now {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 800;
+  background: rgba(0, 0, 0, 0.7);
+  color: #ffffff;
+}
+
+.vp-ep-progress {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 10px;
+  height: 4px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.3);
+  overflow: hidden;
+}
+
+.vp-ep-progress div {
+  height: 100%;
+  background: #ffffff;
+}
+
+.vp-ep-num {
+  margin-top: 10px;
+  font-size: 14px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.vp-ep-title {
+  margin-top: 2px;
+  font-size: 18px;
+  font-weight: 700;
+  color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
