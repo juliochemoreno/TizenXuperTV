@@ -213,8 +213,9 @@ export const BrowseScreen: React.FC<BrowseScreenProps> = ({
 
   useScreenKeys(key => {
     if (key === 'back') {
+      // Back climbs one level at a time: menu -> filter buttons, grid -> filter buttons, then leaves
       if (area === 'menu') setArea('bar');
-      else if (area === 'bar' && items.length) setArea('grid');
+      else if (area === 'grid') setArea('bar');
       else onClose();
       return;
     }

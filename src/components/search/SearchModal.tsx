@@ -7,6 +7,7 @@ import { MOCK_CHANNELS_BY_CATEGORY } from '../../services/mockLiveChannels';
 import { OnScreenKeyboard, KbState, KB_INITIAL, pressKey, moveCursor, keyAt } from '../live/OnScreenKeyboard';
 import { normalizeText } from '../../utils/normalizeText';
 import { normalizeChannels } from '../../lib/channelKey';
+import { allChannelEntries } from '../../lib/channelCache';
 
 export interface SearchModalProps {
   isOpen: boolean;
@@ -62,27 +63,17 @@ export const SearchModal: React.FC<SearchModalProps> = ({
     const list: LiveChannel[] = [...channels];
     const seen = new Set<string>(channels.map(c => String(c.id || c.code)));
 
-    // 1. Read from all localStorage caches
-    try {
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (k && k.startsWith('xuper_live_ch_cache_v2_')) {
-          const raw = localStorage.getItem(k);
-          if (raw) {
-            const parsed = JSON.parse(raw);
-            if (parsed && Array.isArray(parsed.channels)) {
-              for (const ch of normalizeChannels<LiveChannel>(parsed.channels)) {
-                const key = String(ch.id || ch.code);
-                if (!seen.has(key)) {
-                  seen.add(key);
-                  list.push(ch);
-                }
-              }
-            }
-          }
+    // 1. Read from all saved category lists (in memory)
+    for (const entry of allChannelEntries()) {
+      if (!entry || !Array.isArray(entry.channels)) continue;
+      for (const ch of normalizeChannels<LiveChannel>(entry.channels)) {
+        const key = String(ch.id || ch.code);
+        if (!seen.has(key)) {
+          seen.add(key);
+          list.push(ch);
         }
       }
-    } catch {}
+    }
 
     // 2. Add mock channels for comprehensive offline / dev lookup
     Object.values(MOCK_CHANNELS_BY_CATEGORY).forEach(chs => {

@@ -8,6 +8,7 @@ import { channelKey, isSameChannel, normalizeChannels } from '../lib/channelKey'
 import { ChannelRow, CategoryRow } from '../components/live/LiveRows';
 import { OnScreenKeyboard, KbState, KB_INITIAL } from '../components/live/OnScreenKeyboard';
 import { normalizeText } from '../utils/normalizeText';
+import { getChannelEntry, setChannelEntry } from '../lib/channelCache';
 
 declare global {
   interface Window {
@@ -355,12 +356,11 @@ const LiveTvViewInner: React.FC<LiveTvViewProps> = ({
         return;
       }
 
-      // Check localStorage cache
+      // Check the saved list
       try {
-        const cached = localStorage.getItem('xuper_live_ch_cache_v2_' + catKey);
-        if (cached) {
-          const parsed = JSON.parse(cached);
-          if (parsed && Array.isArray(parsed.channels) && parsed.channels.length) {
+        const parsed = getChannelEntry(catKey);
+        if (parsed) {
+          if (Array.isArray(parsed.channels) && parsed.channels.length) {
             const cachedList = normalizeChannels<LiveChannel>(parsed.channels);
             categoryChannelsCache.set(catKey, cachedList);
             cachedList.forEach((c: LiveChannel) => {
@@ -399,9 +399,7 @@ const LiveTvViewInner: React.FC<LiveTvViewProps> = ({
 
           categoryChannelsCache.set(catKey, chs);
 
-          try {
-            localStorage.setItem('xuper_live_ch_cache_v2_' + catKey, JSON.stringify({ at: Date.now(), channels: chs }));
-          } catch (e) {}
+          setChannelEntry(catKey, chs);
         }
         setTimeout(prefetchStep, 400);
       });
@@ -438,12 +436,11 @@ const LiveTvViewInner: React.FC<LiveTvViewProps> = ({
       return;
     }
 
-    // 2. LocalStorage cache: 0ms instant display!
+    // 2. Saved list (memory, loaded from IndexedDB at start): 0ms instant display!
     try {
-      const cached = localStorage.getItem('xuper_live_ch_cache_v2_' + catId);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (parsed && Array.isArray(parsed.channels) && parsed.channels.length) {
+      const parsed = getChannelEntry(catId);
+      if (parsed) {
+        if (Array.isArray(parsed.channels) && parsed.channels.length) {
           const cachedList = normalizeChannels<LiveChannel>(parsed.channels);
           categoryChannelsCache.set(catId, cachedList);
           const visible = filterLockedChannels(cachedList, categories, catId);
@@ -480,9 +477,7 @@ const LiveTvViewInner: React.FC<LiveTvViewProps> = ({
           categoryChannelsCache.set(catId, chs);
           const visible = filterLockedChannels(chs, categories, catId);
           setChannels(visible);
-          try {
-            localStorage.setItem('xuper_live_ch_cache_v2_' + catId, JSON.stringify({ at: Date.now(), channels: chs }));
-          } catch (e) {}
+          setChannelEntry(catId, chs);
           if (onChannelsLoaded) onChannelsLoaded(visible);
         } else {
           // Fallback to local mock channels (essential for desktop browser development / offline)

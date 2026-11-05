@@ -1,3 +1,4 @@
+import { kvGet, kvSet } from '../lib/kvStore';
 import { VodItem, VodEpisode, VodSeason } from '../types/vod';
 
 declare global {
@@ -99,11 +100,19 @@ let liveInFlight: Promise<any[]> | null = null;
 let lastKeyAt = 0;
 if (typeof window !== 'undefined') window.addEventListener('keydown', () => { lastKeyAt = Date.now(); }, true);
 
-function readLiveCatalog(): { at: number; items: any[] } | null {
+/** Saved copy (IndexedDB); a copy left by an earlier version in localStorage is moved over once */
+async function readLiveCatalog(): Promise<{ at: number; items: any[] } | null> {
+  const saved = await kvGet<{ at: number; items: any[] }>(LIVE_KEY);
+  if (saved && Array.isArray(saved.items) && saved.items.length) return saved;
   try {
     const raw = localStorage.getItem(LIVE_KEY);
-    const parsed = raw ? JSON.parse(raw) : null;
-    if (parsed && Array.isArray(parsed.items) && parsed.items.length) return parsed;
+    if (!raw) return null;
+    const old = JSON.parse(raw);
+    localStorage.removeItem(LIVE_KEY);
+    if (old && Array.isArray(old.items) && old.items.length) {
+      kvSet(LIVE_KEY, old);
+      return old;
+    }
   } catch {}
   return null;
 }
@@ -125,7 +134,7 @@ function fetchLiveCatalog(low = false): Promise<any[]> {
     const items = ([] as any[]).concat(...lists);
     console.log(`[catalog] live catalog: ${items.length} items in ${Date.now() - t0} ms`);
     if (items.length < 100) throw new Error(`live catalog too small (${items.length})`);
-    try { localStorage.setItem(LIVE_KEY, JSON.stringify({ at: Date.now(), items })); } catch {}
+    kvSet(LIVE_KEY, { at: Date.now(), items });
     console.log(`[catalog] live catalog saved: ${items.length} items`);
     return items;
   });
@@ -135,8 +144,8 @@ function fetchLiveCatalog(low = false): Promise<any[]> {
 
 class CatalogService {
   /** Refreshes the saved live catalog for the next start (no change on screen) */
-  public refreshLiveInBackground(): void {
-    const saved = readLiveCatalog();
+  public async refreshLiveInBackground(): Promise<void> {
+    const saved = await readLiveCatalog();
     if (saved && Date.now() - saved.at < LIVE_REFRESH_AFTER_MS) return;
     // The answers are decrypted on the main thread: start only while the remote rests
     if (Date.now() - lastKeyAt < 4000) {
@@ -166,7 +175,7 @@ class CatalogService {
     if (this.cache) return this.cache;
 
     // 0. Live catalog: a recent saved copy, else fresh from the portal, else any saved copy
-    const saved = readLiveCatalog();
+    const saved = await readLiveCatalog();
     if (saved && Date.now() - saved.at < LIVE_FRESH_MS) {
       return this.categorize(saved.items.map((it: any, idx: number) => normalizeItem(it, idx)));
     }

@@ -4,6 +4,7 @@ import { LiveChannel, LiveCategory } from '../types/channel';
 import { MOCK_CHANNELS_BY_CATEGORY } from '../services/mockLiveChannels';
 import { KbState, KB_INITIAL } from '../components/live/OnScreenKeyboard';
 import { DrawerArea, LiveLocation } from './types';
+import { getChannelEntry } from '../lib/channelCache';
 import { channelKey, cleanFavMap, isSameChannel, normalizeChannel, normalizeChannels } from '../lib/channelKey';
 
 /** Live TV state: categories, channels, tuned channel, favorites and the fullscreen player/drawer */
@@ -127,13 +128,8 @@ export function useLiveTv() {
   // `preferIndex` wins when it contains the channel; otherwise the first specific category does.
   const locateLiveChannel = useCallback((ch: LiveChannel, cats: LiveCategory[] = liveCategories, preferIndex?: number): LiveLocation | null => {
     const listFor = (catId: string | number): LiveChannel[] => {
-      try {
-        const raw = localStorage.getItem('xuper_live_ch_cache_v2_' + catId);
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (parsed && Array.isArray(parsed.channels)) return normalizeChannels<LiveChannel>(parsed.channels);
-        }
-      } catch {}
+      const entry = getChannelEntry(catId);
+      if (entry && Array.isArray(entry.channels)) return normalizeChannels<LiveChannel>(entry.channels);
       return MOCK_CHANNELS_BY_CATEGORY[String(catId)] || [];
     };
     const posIn = (i: number): number => {
