@@ -130,7 +130,19 @@ function homeRoot(root: string, low: boolean): Promise<any[]> {
 function fetchLiveCatalog(low = false): Promise<any[]> {
   if (liveInFlight) return liveInFlight;
   const t0 = Date.now();
-  liveInFlight = Promise.all(LIVE_ROOTS.map(root => homeRoot(root, low).catch(() => [] as any[]))).then(lists => {
+  // Background: one root at a time, each only while the remote has rested for 4 s, so a request
+  // the user makes never lands behind a long download. Foreground: all roots at once.
+  const idle = (): Promise<void> => new Promise(resolve => {
+    const check = () => (Date.now() - lastKeyAt >= 4000 ? resolve() : setTimeout(check, 1000));
+    check();
+  });
+  const roots: Promise<any[][]> = low
+    ? LIVE_ROOTS.reduce<Promise<any[][]>>(
+        (acc, root) => acc.then(lists => idle().then(() => homeRoot(root, true)).catch(() => [] as any[]).then(items => lists.concat([items]))),
+        Promise.resolve([])
+      )
+    : Promise.all(LIVE_ROOTS.map(root => homeRoot(root, false).catch(() => [] as any[])));
+  liveInFlight = roots.then(lists => {
     const items = ([] as any[]).concat(...lists);
     console.log(`[catalog] live catalog: ${items.length} items in ${Date.now() - t0} ms`);
     if (items.length < 100) throw new Error(`live catalog too small (${items.length})`);

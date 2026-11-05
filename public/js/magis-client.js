@@ -132,7 +132,9 @@
   }
 
   // Decrypt + parse in a worker (js/magis-worker.js); the main thread only when workers fail
-  var decWorker = null;
+  // Two workers: a long background download (a home root takes seconds to decrypt on the TV) never
+  // delays the answer the user is waiting for
+  var decWorkers = [null, null];
   var decWorkerBroken = false;
   var decJobs = {};
   var decSeq = 0;
@@ -151,8 +153,10 @@
     decWorkerBroken = true;
     var jobs = decJobs;
     decJobs = {};
-    try { if (decWorker) decWorker.terminate(); } catch (e) {}
-    decWorker = null;
+    for (var w = 0; w < decWorkers.length; w++) {
+      try { if (decWorkers[w]) decWorkers[w].terminate(); } catch (e) {}
+      decWorkers[w] = null;
+    }
     console.log('[MagisClient] decrypt worker off, using main thread:', why);
     for (var id in jobs) {
       if (Object.prototype.hasOwnProperty.call(jobs, id)) {
@@ -161,27 +165,28 @@
     }
   }
 
-  function decryptData(hex, cb) {
+  function decryptData(hex, cb, low) {
     if (decWorkerBroken || typeof Worker === 'undefined') return decryptSync(hex, cb);
-    if (!decWorker) {
+    var slot = low ? 1 : 0;
+    if (!decWorkers[slot]) {
       try {
-        decWorker = new Worker('js/magis-worker.js');
-        decWorker.onmessage = function (e) {
+        var wk = new Worker('js/magis-worker.js');
+        wk.onmessage = function (e) {
           var job = decJobs[e.data.id];
           delete decJobs[e.data.id];
           if (!job) return;
           if (e.data.error) job.cb(new Error(e.data.error));
           else job.cb(null, e.data.data);
         };
-        decWorker.onerror = function (e) { failDecWorker(e && e.message); };
+        wk.onerror = function (e) { failDecWorker(e && e.message); };
+        decWorkers[slot] = wk;
       } catch (e) {
-        decWorker = null;
         return failDecWorker(e && e.message);
       }
     }
     var id = ++decSeq;
     decJobs[id] = { hex: hex, cb: cb };
-    decWorker.postMessage({ id: id, hex: hex, keyHex: KEY_HEX });
+    decWorkers[slot].postMessage({ id: id, hex: hex, keyHex: KEY_HEX });
   }
 
   function randomHex(bytesCount) {
@@ -328,7 +333,10 @@
     return list;
   }
 
-  function postHttp(path, payload, done) {
+  // opts.onNet: called once the answer has arrived (before it is decrypted), so the request queue
+  // moves on while the worker decrypts; opts.low: decrypt in the background worker
+  function postHttp(path, payload, done, opts) {
+    opts = opts || {};
     var bodyHex;
     try {
       bodyHex = encryptBody(JSON.stringify(payload));
@@ -383,12 +391,13 @@
           }
 
           if (typeof resp.data === 'string' && resp.data !== '') {
+            if (opts.onNet) { var netDone = opts.onNet; opts.onNet = null; netDone(); }
             decryptData(resp.data, function (dErr, decData) {
               if (finished) return;
               if (dErr) return tryHost();
               finished = true;
               done(null, decData);
-            });
+            }, !!opts.low);
             return;
           }
 
@@ -447,8 +456,14 @@
         if (Object.prototype.hasOwnProperty.call(payload, p)) fullPayload[p] = payload[p];
       }
 
-      postHttp(endpoint, fullPayload, function (err, res) {
+      var released = false;
+      function releaseOnce() {
+        if (released) return;
+        released = true;
         release();
+      }
+      postHttp(endpoint, fullPayload, function (err, res) {
+        releaseOnce();
         if (err && (err.portalCode === 'aaa100028' || err.portalCode === 'aaa100027' || /aaa10002[0-9]|未登录|sesi[oó]n|login|token/i.test((err.portalCode || '') + ' ' + (err.message || ''))) && !opts._retried) {
           clearSession();
           return ensureSession(function (sErr) {
@@ -458,7 +473,7 @@
           });
         }
         callback(err, res);
-      });
+      }, { onNet: releaseOnce, low: !!opts.low });
     }, !!opts.low);
   }
 
