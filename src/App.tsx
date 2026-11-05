@@ -13,7 +13,7 @@ import { favoritesService } from './services/favoritesService';
 import { useTvRemote, TvKey } from './hooks/useTvRemote';
 import { useScreenStack } from './hooks/useScreenStack';
 import { useStableHandlers } from './hooks/useStableHandlers';
-import { hideSplash, setSplashStatus } from './lib/splash';
+import { startSplash, completeSplashTask, preloadImages } from './lib/splash';
 import { VodItem, VodEpisode } from './types/vod';
 import { LiveChannel, LiveCategory } from './types/channel';
 import { historyService } from './services/historyService';
@@ -173,18 +173,6 @@ export const App: React.FC = () => {
     }
   }
 
-  // Splash (index.html): stays until the catalog is on screen, never longer than 8 s
-  useEffect(() => {
-    setSplashStatus('Cargando catálogo…');
-    const fallback = setTimeout(hideSplash, 8000);
-    return () => clearTimeout(fallback);
-  }, []);
-  useEffect(() => {
-    if (featuredItems.length || movieItems.length || seriesItems.length) {
-      requestAnimationFrame(() => requestAnimationFrame(hideSplash));
-    }
-  }, [featuredItems, movieItems, seriesItems]);
-
   // Hero and rows for the active VOD tab
   const currentHeroItems = useMemo<VodItem[]>(
     () => heroItemsForTab(selectedTab, catalog),
@@ -195,6 +183,24 @@ export const App: React.FC = () => {
     [selectedTab, historyItems, seriesItems, movieItems, featuredItems, kidsItems, animeItems, catalog.catalogRows]
   );
   const totalRows = currentRows.length;
+
+  // Splash (index.html): a real loading screen, see lib/splash.ts
+  useEffect(() => { startSplash(); }, []);
+  const splashImagesRef = useRef(false);
+  useEffect(() => {
+    if (splashImagesRef.current || !(featuredItems.length || movieItems.length || seriesItems.length)) return;
+    splashImagesRef.current = true;
+    completeSplashTask('catalog');
+    // The first screen is complete once the hero and the visible posters are decoded
+    const hero = currentHeroItems[0];
+    const urls: string[] = hero ? [hero.backdrop || hero.landscape || hero.poster || ''] : [];
+    currentRows.slice(0, 3).forEach(row => {
+      (row.items as { poster?: string; landscape?: string; backdrop?: string }[]).slice(0, 7).forEach(it => {
+        urls.push(it.poster || it.landscape || it.backdrop || '');
+      });
+    });
+    preloadImages(urls).then(() => completeSplashTask('images'));
+  }, [currentRows, currentHeroItems, featuredItems, movieItems, seriesItems]);
   const getRowItemCount = useCallback((rowIdx: number): number => {
     return currentRows[rowIdx] ? currentRows[rowIdx].items.length : 0;
   }, [currentRows]);
@@ -335,6 +341,7 @@ export const App: React.FC = () => {
     },
     onCategoriesLoaded: (cats: LiveCategory[]) => {
       setLiveCategories(cats);
+      completeSplashTask('live');
     },
     onSelectCategory: (idx: number) => {
       guardLiveCat(idx, () => {

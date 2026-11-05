@@ -70,6 +70,7 @@ export function addCssFallbacks(css: string): string {
  * Moves the external scripts out of <head> into a small loader at the end of <body> that starts
  * after the first paint, so the splash screen shows at once instead of a black screen while
  * ~1.3 MB of scripts (portal data, hls, crypto) are parsed. Order is kept (one after another).
+ * Each script advances the splash bar up to 30% (the app fills the rest, see src/lib/splash.ts).
  * webapis.js stays in <head>: it is tiny and the Tizen runtime resolves its $WEBAPIS path.
  */
 function deferHeavyScripts(html: string): string {
@@ -79,7 +80,7 @@ function deferHeavyScripts(html: string): string {
     srcs.push(src);
     return '';
   });
-  const loader = `<script>(function(){var s=${JSON.stringify(srcs)};function n(i){if(i>=s.length)return;var e=document.createElement('script');e.src=s[i];e.async=false;e.onload=e.onerror=function(){n(i+1)};document.body.appendChild(e)}requestAnimationFrame(function(){setTimeout(function(){n(0)},0)})})();</script>`;
+  const loader = `<script>(function(){var s=${JSON.stringify(srcs)};function n(i){if(i>=s.length)return;var e=document.createElement('script');e.src=s[i];e.async=false;e.onload=e.onerror=function(){var f=document.querySelector('#xuper-splash .xs-fill');if(f)f.style.width=Math.round(4+26*(i+1)/s.length)+'%';n(i+1)};document.body.appendChild(e)}requestAnimationFrame(function(){setTimeout(function(){n(0)},0)})})();</script>`;
   return html.replace('</body>', loader + '\n</body>');
 }
 
