@@ -1,6 +1,6 @@
 import React, { useRef, useEffect } from 'react';
 import { useRenderCount } from '../debug/renderCount';
-import { animateScroll } from '../utils/scrollHelper';
+import { setTrackOffset } from '../utils/scrollHelper';
 import { VodItem } from '../types/vod';
 import { HistoryItem } from '../types/history';
 import { HeroShowcase } from '../components/vod/HeroShowcase';
@@ -62,19 +62,23 @@ export const DestacadosView: React.FC<DestacadosViewProps> = ({
 }) => {
   useRenderCount('DestacadosView');
   const containerRef = useRef<HTMLDivElement>(null);
+  const trackRef = useRef<HTMLDivElement>(null);
   const currentHero = heroItems[activeHeroIndex] || heroItems[0];
 
-  // Auto-scroll logic: when vertical row focus changes, smoothly frame the section
+  // Vertical framing: the page track moves with a GPU transform (see scrollHelper)
   useEffect(() => {
-    if (!isFocusActive || !containerRef.current) return;
+    const track = trackRef.current;
+    const container = containerRef.current;
+    if (!isFocusActive || !track || !container) return;
 
     if (focus.area === 'hero') {
-      animateScroll(containerRef.current, 'top', 0, 200);
+      setTrackOffset(track, 'y', 0);
     } else if (focus.area === 'row') {
-      const sections = containerRef.current.querySelectorAll('.content-section');
-      if (sections[focus.rowIndex]) {
-        const secEl = sections[focus.rowIndex] as HTMLElement;
-        animateScroll(containerRef.current, 'top', Math.max(0, secEl.offsetTop - 24), 200);
+      const sections = track.querySelectorAll('.content-section');
+      const secEl = sections[focus.rowIndex] as HTMLElement | undefined;
+      if (secEl) {
+        const max = Math.max(0, track.offsetHeight - container.clientHeight + 60);
+        setTrackOffset(track, 'y', Math.min(max, Math.max(0, secEl.offsetTop - 24)));
       }
     }
   }, [isFocusActive, focus.area, focus.rowIndex]);
@@ -133,6 +137,7 @@ export const DestacadosView: React.FC<DestacadosViewProps> = ({
 
   return (
     <div className="page-container" ref={containerRef}>
+      <div className="page-track" ref={trackRef}>
       <HeroShowcase
         item={currentHero}
         totalItems={heroItems.length}
@@ -174,6 +179,7 @@ export const DestacadosView: React.FC<DestacadosViewProps> = ({
           />
         );
       })}
+      </div>
     </div>
   );
 };

@@ -33,6 +33,7 @@ import { handleVodDetailKeys } from './app/keys/vodDetailKeys';
 import { handleHeaderKeys } from './app/keys/headerKeys';
 import { handleLiveTvKeys } from './app/keys/liveTvKeys';
 import { handleVodTabsKeys } from './app/keys/vodTabsKeys';
+import { getTrackOffset, setTrackOffset } from './utils/scrollHelper';
 
 export const App: React.FC = () => {
   // Read initial tab from URL if present (useful for deep-links & testing)
@@ -168,10 +169,8 @@ export const App: React.FC = () => {
     const scrollParam = urlParams.get('scrollTop');
     if (scrollParam) {
       setTimeout(() => {
-        const c = document.querySelector('.page-container');
-        if (c) {
-          c.scrollTop = parseInt(scrollParam, 10);
-        }
+        const t = document.querySelector('.page-track') as HTMLElement | null;
+        if (t) setTrackOffset(t, 'y', parseInt(scrollParam, 10), false);
       }, 400);
     }
   }
@@ -254,20 +253,20 @@ export const App: React.FC = () => {
     if (prev === selectedTab) return;
     prevTabRef.current = selectedTab;
 
-    const container = document.querySelector('.page-container') as HTMLElement | null;
+    const track = document.querySelector('.page-track') as HTMLElement | null;
     if (prev !== 'tv') {
       tabMemoryRef.current[prev] = {
         focus: destacadosFocus,
         hero: activeHeroIndex,
-        scrollTop: container ? container.scrollTop : 0
+        scrollTop: getTrackOffset(track)
       };
     }
     const saved = tabMemoryRef.current[selectedTab];
     setDestacadosFocus(saved ? saved.focus : { area: 'hero', heroBtn: 'play', rowIndex: 0, cardIndex: 0 });
     setActiveHeroIndex(saved ? saved.hero : 0);
     requestAnimationFrame(() => {
-      const c = document.querySelector('.page-container') as HTMLElement | null;
-      if (c) c.scrollTop = saved ? saved.scrollTop : 0;
+      const t = document.querySelector('.page-track') as HTMLElement | null;
+      if (t) setTrackOffset(t, 'y', saved ? saved.scrollTop : 0, false);
     });
   }, [selectedTab]);
 
