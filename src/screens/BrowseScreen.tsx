@@ -267,13 +267,16 @@ export const BrowseScreen: React.FC<BrowseScreenProps> = ({
   return (
     <div className="browse-screen" style={hidden ? { display: 'none' } : undefined}>
       <div className="browse-head">
-        <div className="browse-title">{sectionTitle}</div>
+        <div className="browse-heading">
+          <div className="browse-title">{sectionTitle}</div>
+          <div className="browse-count">
+            {total ? `${total.toLocaleString('es')} títulos` : loading ? 'Cargando…' : ''}
+          </div>
+        </div>
+        {/* Fixed on the right, whatever the title length */}
         <div className="browse-filters">
           {filterButton(0, 'tag', tag)}
           {filterButton(1, 'year', year)}
-        </div>
-        <div className="browse-count">
-          {total ? `${total.toLocaleString('es')} títulos` : loading ? 'Cargando…' : ''}
         </div>
       </div>
 

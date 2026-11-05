@@ -4341,15 +4341,27 @@ html.xuper-vod-avplay .app-root,
   padding: 44px 60px 0;
 }
 
+.browse-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 18px;
+  min-width: 0;
+}
+
 .browse-title {
   font-size: 40px;
   font-weight: 800;
   letter-spacing: -0.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .browse-filters {
   display: flex;
   gap: 14px;
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .browse-filter {
@@ -4390,7 +4402,7 @@ html.xuper-vod-avplay .app-root,
 }
 
 .browse-count {
-  margin-left: auto;
+  flex-shrink: 0;
   font-size: 20px;
   color: rgba(255, 255, 255, 0.55);
 }
@@ -4398,7 +4410,7 @@ html.xuper-vod-avplay .app-root,
 .browse-menu {
   position: absolute;
   top: calc(100% + 12px);
-  left: 0;
+  right: 0;
   min-width: 280px;
   padding: 10px;
   border-radius: 18px;
