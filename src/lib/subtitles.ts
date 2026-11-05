@@ -28,7 +28,14 @@ const LANG_NAMES: Record<string, string> = {
 export function languageName(code: string | undefined): string {
   const c = String(code || '').trim().toLowerCase();
   if (!c) return 'Original';
-  return LANG_NAMES[c] || LANG_NAMES[c.split(/[-_]/)[0]] || c.toUpperCase();
+  const known = LANG_NAMES[c] || LANG_NAMES[c.split(/[-_]/)[0]];
+  if (known) return known;
+  // Already a language name ("Español", "Inglés · 720p")
+  const names = Object.keys(LANG_NAMES).map(k => LANG_NAMES[k]);
+  for (const n of names) {
+    if (c === n.toLowerCase() || c.indexOf(n.toLowerCase()) === 0) return n;
+  }
+  return c.toUpperCase();
 }
 
 /** Order of the language preference stored in the profile settings */

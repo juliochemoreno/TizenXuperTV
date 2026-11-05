@@ -4,6 +4,7 @@ import { catalogService } from '../services/catalogService';
 import { PosterCard } from '../components/vod/PosterCard';
 import { scrollHorizontalSlider } from '../utils/scrollHelper';
 import { historyService } from '../services/historyService';
+import { settingsService, PREFERRED_LANGUAGES, SUBTITLE_CHOICES, subtitleChoiceIndex } from '../services/settingsService';
 import { getResumeTarget } from '../lib/vodResume';
 
 export type DetailFocusArea = 'back' | 'actions' | 'seasons' | 'episodes' | 'related' | 'audioModal';
@@ -20,18 +21,8 @@ export interface VodDetailFocus {
 
 const NO_EPISODES: VodEpisode[] = [];
 
-export const AUDIO_OPTIONS = [
-  'Español (Latinoamérica)',
-  'Español (España)',
-  'Inglés [Original] (Dolby 5.1)'
-];
-
-export const SUB_OPTIONS = [
-  'Desactivados',
-  'Español',
-  'Inglés',
-  'Español [CC]'
-];
+export const AUDIO_OPTIONS = PREFERRED_LANGUAGES;
+export const SUB_OPTIONS = SUBTITLE_CHOICES;
 
 interface VodDetailViewProps {
   item: VodItem;
@@ -82,10 +73,11 @@ export const VodDetailView: React.FC<VodDetailViewProps> = ({
 
   useEffect(() => historyService.subscribe(() => setHistoryTick(t => t + 1)), []);
 
-  // Audio & Sub preferences from storage
-  const currentAudio = localStorage.getItem('xuper_audio_pref') || 'Español (Latinoamérica)';
-  const currentSub = localStorage.getItem('xuper_sub_pref') || 'Desactivados';
-  const audioShortName = currentAudio.includes('España') ? 'Castellano' : (currentAudio.includes('Inglés') ? 'Inglés' : 'Latino');
+  // Audio & subtitle preferences: the same ones as the profile (Configuración global)
+  const prefs = settingsService.get();
+  const currentAudio = AUDIO_OPTIONS[prefs.audio] || AUDIO_OPTIONS[0];
+  const currentSub = SUB_OPTIONS[subtitleChoiceIndex(prefs)] || SUB_OPTIONS[0];
+  const audioShortName = currentAudio;
 
   const episodesSliderRef = useRef<HTMLDivElement>(null);
   const relatedSliderRef = useRef<HTMLDivElement>(null);

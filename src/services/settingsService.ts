@@ -49,3 +49,18 @@ class SettingsService {
 }
 
 export const settingsService = new SettingsService();
+
+/** Language codes in the same order as the audio / subtitle language options of the profile */
+export const PREFERRED_LANGUAGES = ['Español', 'Portugués', 'Inglés'];
+
+/** Subtitle options of the detail modal: "Desactivados" followed by the three languages */
+export const SUBTITLE_CHOICES = ['Desactivados', ...PREFERRED_LANGUAGES];
+
+export function subtitleChoiceIndex(st: PlaybackSettings): number {
+  return st.subtitle ? st.subLang + 1 : 0;
+}
+
+export function applySubtitleChoice(idx: number): void {
+  if (idx <= 0) settingsService.set({ subtitle: false });
+  else settingsService.set({ subtitle: true, subLang: idx - 1 });
+}

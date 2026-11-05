@@ -14,6 +14,7 @@ import { useTvRemote, TvKey } from './hooks/useTvRemote';
 import { useScreenStack } from './hooks/useScreenStack';
 import { VodItem, VodEpisode } from './types/vod';
 import { historyService } from './services/historyService';
+import { settingsService, applySubtitleChoice, PREFERRED_LANGUAGES, SUBTITLE_CHOICES } from './services/settingsService';
 import { getResumeTarget, startAtForEpisode } from './lib/vodResume';
 import { FocusDomain, VodPlayerState } from './app/types';
 import { useCatalog } from './app/useCatalog';
@@ -413,11 +414,11 @@ export const App: React.FC = () => {
           onOpenAudioModal={() => setDetailFocus(prev => ({ ...prev, area: 'audioModal', modalCol: 'audio', modalIndex: 0 }))}
           onCloseAudioModal={() => setDetailFocus(prev => ({ ...prev, area: 'actions', actionIndex: 2 }))}
           onSelectAudioOption={opt => {
-            localStorage.setItem('xuper_audio_pref', opt);
+            settingsService.set({ audio: Math.max(0, PREFERRED_LANGUAGES.indexOf(opt)) });
             setDetailFocus(prev => ({ ...prev }));
           }}
           onSelectSubOption={sub => {
-            localStorage.setItem('xuper_sub_pref', sub);
+            applySubtitleChoice(Math.max(0, SUBTITLE_CHOICES.indexOf(sub)));
             setDetailFocus(prev => ({ ...prev }));
           }}
         />

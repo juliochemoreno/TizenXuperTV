@@ -1,5 +1,6 @@
 import { TvKey } from '../../hooks/useTvRemote';
 import { favoritesService } from '../../services/favoritesService';
+import { settingsService, applySubtitleChoice } from '../../services/settingsService';
 import { VodDetailFocus, AUDIO_OPTIONS, SUB_OPTIONS } from '../../views/VodDetailView';
 import { VodItem, VodEpisode } from '../../types/vod';
 import { DetailCounts } from '../useVodDetail';
@@ -64,13 +65,9 @@ export function handleVodDetailKeys(key: TvKey, ctx: VodDetailKeysCtx): boolean 
       return true;
     }
     if (key === 'enter') {
-      if (col === 'audio') {
-        const opt = AUDIO_OPTIONS[idx];
-        if (opt) localStorage.setItem('xuper_audio_pref', opt);
-      } else {
-        const sub = SUB_OPTIONS[idx];
-        if (sub) localStorage.setItem('xuper_sub_pref', sub);
-      }
+      // Same preferences as the profile (Configuración global)
+      if (col === 'audio') settingsService.set({ audio: idx });
+      else applySubtitleChoice(idx);
       setDetailFocus(prev => ({ ...prev, area: 'actions', actionIndex: 2 }));
       return true;
     }

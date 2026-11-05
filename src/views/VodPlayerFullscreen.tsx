@@ -103,6 +103,7 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
   const [toastId, setToastId] = useState<number>(0);
   const portalTrackRef = useRef<number>(0);
   const subsInitRef = useRef<boolean>(false);
+  const audioPrefAppliedRef = useRef<boolean>(false);
   const toastTimerRef = useRef<any>(null);
   const settings = settingsService.get();
 
@@ -242,7 +243,12 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
           console.log('[VodPlayer] AVPlay audio tracks', audios.length);
           if (audios.length > 1) {
             setAudioOptions(audios);
-            setAudioIndex(0);
+            const prefCode = PREF_LANG_CODES[settingsService.get().audio] || 'es';
+            const wantedIdx = Math.max(0, audios.findIndex(a => sameLanguage(a.label, prefCode)));
+            setAudioIndex(wantedIdx);
+            if (wantedIdx > 0) {
+              try { window.webapis.avplay.setSelectTrack('AUDIO', audios[wantedIdx].index); } catch (e) {}
+            }
           }
         } catch (e) {}
       };
@@ -291,11 +297,25 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
       return;
     }
 
-    window.MagisClient.resolve(contentId, seasonId, { trackIndex: portalTrackRef.current }, (err: any, res: any) => {
+    const onResolved = (err: any, res: any) => {
       if (!isCurrent()) return; // the user already left or chose another episode
       if (err || !res || !res.url) {
         failed((err && err.message) || 'No se pudo obtener el video del portal.');
         return;
+      }
+      // The portal returns its first track (often Portuguese): switch to the preferred audio
+      // language once, unless the user already picked a track in this player
+      if (!audioPrefAppliedRef.current) {
+        audioPrefAppliedRef.current = true;
+        const tracksNow: any[] = Array.isArray(res.tracks) ? res.tracks : [];
+        const prefCode = PREF_LANG_CODES[settingsService.get().audio] || 'es';
+        const wanted = tracksNow.find(t => sameLanguage(t.audio, prefCode));
+        if (wanted && wanted.index !== res.trackIndex) {
+          console.log('[VodPlayer] preferred audio', prefCode, '-> track', wanted.index, 'instead of', res.trackIndex);
+          portalTrackRef.current = wanted.index;
+          window.MagisClient.resolve(contentId, seasonId, { trackIndex: wanted.index }, onResolved);
+          return;
+        }
       }
       setStreamInfoText([res.quality, res.codec, res.audio && `Audio: ${res.audio}`].filter(Boolean).join(' · '));
       setQuality(res.quality || '');
@@ -325,7 +345,9 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
         const license = res.headers?.['Content-License'] || '';
         setBrowserUrl(`/stream-proxy?url=${encodeURIComponent(res.url)}&auth=${encodeURIComponent(auth)}&license=${encodeURIComponent(license)}`);
       }
-    });
+    };
+
+    window.MagisClient.resolve(contentId, seasonId, { trackIndex: portalTrackRef.current }, onResolved);
 
     return () => {
       requestIdRef.current++;
@@ -473,6 +495,9 @@ export const VodPlayerFullscreen: React.FC<VodPlayerFullscreenProps> = ({
     const opt = audioOptions[idx];
     if (!opt || idx === audioIndex) return;
     setAudioIndex(idx);
+    audioPrefAppliedRef.current = true; // a manual choice wins over the preference
+    const audioPrefIdx = PREF_LANG_CODES.findIndex(code => sameLanguage(opt.label, code));
+    if (audioPrefIdx !== -1) settingsService.set({ audio: audioPrefIdx });
     if (opt.kind === 'avplay') {
       try { window.webapis.avplay.setSelectTrack('AUDIO', opt.index); } catch (e) {}
     } else {
