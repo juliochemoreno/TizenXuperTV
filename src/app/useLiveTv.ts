@@ -4,7 +4,7 @@ import { LiveChannel, LiveCategory } from '../types/channel';
 import { MOCK_CHANNELS_BY_CATEGORY } from '../services/mockLiveChannels';
 import { KbState, KB_INITIAL } from '../components/live/OnScreenKeyboard';
 import { DrawerArea, LiveLocation } from './types';
-import { channelKey, cleanFavMap, normalizeChannel, normalizeChannels } from '../lib/channelKey';
+import { channelKey, cleanFavMap, isSameChannel, normalizeChannel, normalizeChannels } from '../lib/channelKey';
 
 /** Live TV state: categories, channels, tuned channel, favorites and the fullscreen player/drawer */
 export function useLiveTv() {
@@ -123,12 +123,9 @@ export function useLiveTv() {
   }, []);
 
   // Finds the live category (index in liveCategories) and position that contain a channel,
-  // so a search result can open its own category with the channel selected.
-  const locateLiveChannel = useCallback((ch: LiveChannel): LiveLocation | null => {
-    const sameChannel = (c: LiveChannel) =>
-      String(c.id) === String(ch.id) ||
-      (!!c.code && !!ch.code && String(c.code) === String(ch.code)) ||
-      (!!c.name && !!ch.name && c.name.trim().toLowerCase() === ch.name.trim().toLowerCase());
+  // so a search result or the remembered channel opens its own category with the channel selected.
+  // `preferIndex` wins when it contains the channel; otherwise the first specific category does.
+  const locateLiveChannel = useCallback((ch: LiveChannel, cats: LiveCategory[] = liveCategories, preferIndex?: number): LiveLocation | null => {
     const listFor = (catId: string | number): LiveChannel[] => {
       try {
         const raw = localStorage.getItem('xuper_live_ch_cache_v2_' + catId);
@@ -139,15 +136,22 @@ export function useLiveTv() {
       } catch {}
       return MOCK_CHANNELS_BY_CATEGORY[String(catId)] || [];
     };
+    const posIn = (i: number): number => {
+      const cat = cats[i];
+      if (!cat || cat.isFav || String(cat.id) === 'favs') return -1;
+      return listFor(cat.id).findIndex(c => isSameChannel(c, ch));
+    };
 
+    if (preferIndex !== undefined) {
+      const pos = posIn(preferIndex);
+      if (pos !== -1) return { catIndex: preferIndex, channelIndex: pos };
+    }
     let fallback: LiveLocation | null = null;
-    for (let i = 0; i < liveCategories.length; i++) {
-      const cat = liveCategories[i];
-      if (cat.isFav || String(cat.id) === 'favs') continue;
-      const pos = listFor(cat.id).findIndex(sameChannel);
+    for (let i = 0; i < cats.length; i++) {
+      const pos = posIn(i);
       if (pos === -1) continue;
       // Prefer a specific category over an aggregate one ("Todos los canales")
-      if (/todos/i.test(cat.name)) {
+      if (/todos/i.test(cats[i].name)) {
         if (!fallback) fallback = { catIndex: i, channelIndex: pos };
         continue;
       }

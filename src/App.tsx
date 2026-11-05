@@ -342,6 +342,14 @@ export const App: React.FC = () => {
     onCategoriesLoaded: (cats: LiveCategory[]) => {
       setLiveCategories(cats);
       completeSplashTask('live');
+      // Open the category that holds the remembered channel: the saved index can point to
+      // another category (the list changed, or the user browsed without tuning)
+      if (tunedLiveChannel) {
+        const loc = locateLiveChannel(tunedLiveChannel, cats, liveTvFocus.selectedCatIndex);
+        if (loc) {
+          setLiveTvFocus(prev => ({ ...prev, catIndex: loc.catIndex, selectedCatIndex: loc.catIndex, channelIndex: loc.channelIndex }));
+        }
+      }
     },
     onSelectCategory: (idx: number) => {
       guardLiveCat(idx, () => {
