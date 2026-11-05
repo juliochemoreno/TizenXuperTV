@@ -163,6 +163,7 @@ export const DestacadosView: React.FC<DestacadosViewProps> = ({
             subtitle={row.subtitle}
             items={row.items as VodItem[]}
             isRanked={row.isRanked}
+            nearFocus={rowIdx <= (isFocusActive && focus.area === 'row' ? focus.rowIndex : 0) + 2}
             isWide={row.isWide}
             focusedIndex={focusedIndex}
             onActivate={onActivateVod}

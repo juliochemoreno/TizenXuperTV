@@ -6,6 +6,8 @@ interface PosterCardProps {
   isFocused: boolean;
   rank?: number; // 1-10 for Top 10 rows
   isWide?: boolean; // 4:3 / landscape card (e.g. Colección Destacada)
+  /** False until the card is near the screen: its image is not downloaded or decoded before */
+  showImage?: boolean;
   onActivate: (item: VodItem) => void;
 }
 
@@ -14,6 +16,7 @@ const PosterCardComponent: React.FC<PosterCardProps> = ({
   isFocused,
   rank,
   isWide,
+  showImage = true,
   onActivate
 }) => {
   const posterUrl = isWide
@@ -38,7 +41,7 @@ const PosterCardComponent: React.FC<PosterCardProps> = ({
     >
       <div
         className="poster-card-img"
-        style={{ backgroundImage: `url('${posterUrl}')` }}
+        style={showImage ? { backgroundImage: `url('${posterUrl}')` } : undefined}
       >
         {/* Top 10 Rank Number in clean Apple TV typography */}
         {rank !== undefined && rank > 0 && !isWide && (
@@ -98,7 +101,8 @@ export const PosterCard = React.memo<PosterCardProps>(
       prev.isFocused === next.isFocused &&
       prev.item.id === next.item.id &&
       prev.rank === next.rank &&
-      prev.isWide === next.isWide
+      prev.isWide === next.isWide &&
+      prev.showImage === next.showImage
     );
   }
 );
