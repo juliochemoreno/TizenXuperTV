@@ -12,7 +12,7 @@ interface BrowseScreenProps {
   title: string;
   initialTag?: string;
   initialYear?: string;
-  /** A fixed list (a portal column with no full listing): shown as is, without filters */
+  /** Titles of the row's portal column (no full listing exists): shown first, then the section */
   fixedItems?: VodItem[];
   onClose: () => void;
   onOpenVod: (item: VodItem) => void;
@@ -99,7 +99,7 @@ export const BrowseScreen: React.FC<BrowseScreenProps> = ({
   const [year, setYear] = useState(initialYear);
   const [items, setItems] = useState<VodItem[]>(fixedItems || []);
   const [total, setTotal] = useState(fixedItems ? fixedItems.length : 0);
-  const [loading, setLoading] = useState(!fixedItems);
+  const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [area, setArea] = useState<Area>('grid');
   const [barIndex, setBarIndex] = useState(0); // 0 = genre, 1 = year
@@ -113,7 +113,7 @@ export const BrowseScreen: React.FC<BrowseScreenProps> = ({
   // Filter values of the section
   useEffect(() => {
     const client = window.MagisClient;
-    if (fixedItems || !client || typeof client.browseFilters !== 'function') return;
+    if (!client || typeof client.browseFilters !== 'function') return;
     client.browseFilters(root, (err: any, res: any) => {
       if (err || !res) return;
       setTags(res.tags || []);
@@ -122,18 +122,22 @@ export const BrowseScreen: React.FC<BrowseScreenProps> = ({
   }, [root]);
 
   const loadMore = useCallback(() => {
-    if (fixedItems || loadingRef.current) return;
+    if (loadingRef.current) return;
     const query = queryRef.current;
     loadingRef.current = true;
     setLoading(true);
     const first = pageRef.current === 0;
+    // Without filters, the row's own titles come first and the section follows (no repeats)
+    const lead = fixedItems && !tag && !year ? fixedItems : [];
+    const leadIds = new Set(lead.map(it => it.id));
     loadPage(root, tag, year, pageRef.current + 1).then(page => {
       if (query !== queryRef.current) return;
       pageRef.current += 1;
+      const fresh = page.items.filter(it => !leadIds.has(it.id));
       // A new filter replaces the grid only when its first page is here (no empty screen meanwhile)
-      setItems(prev => (first ? page.items : prev.concat(page.items)));
-      if (first) setCursor(0);
-      setTotal(page.total);
+      setItems(prev => (first ? lead.concat(fresh) : prev.concat(fresh)));
+      if (first && !lead.length) setCursor(0);
+      setTotal(lead.length + page.total);
       setFailed(false);
     }, () => {
       if (query === queryRef.current) setFailed(true);
@@ -142,11 +146,10 @@ export const BrowseScreen: React.FC<BrowseScreenProps> = ({
       loadingRef.current = false;
       setLoading(false);
     });
-  }, [root, tag, year]);
+  }, [root, tag, year, fixedItems]);
 
   // New filter: start over from page 1
   useEffect(() => {
-    if (fixedItems) return;
     queryRef.current += 1;
     pageRef.current = 0;
     loadingRef.current = false;
@@ -207,7 +210,7 @@ export const BrowseScreen: React.FC<BrowseScreenProps> = ({
       else if (key === 'right') setCursor(c => (c % COLS === COLS - 1 || c + 1 >= items.length ? c : c + 1));
       else if (key === 'down') setCursor(c => (c + COLS < items.length ? c + COLS : c));
       else if (key === 'up') {
-        if (cursor < COLS && !fixedItems) setArea('bar');
+        if (cursor < COLS) setArea('bar');
         else setCursor(c => c - COLS);
       } else if (key === 'enter') {
         const it = items[cursor];
@@ -263,18 +266,16 @@ export const BrowseScreen: React.FC<BrowseScreenProps> = ({
   );
 
   // The row's title while its filter is on; the section name once the user changes the filters
-  const sectionTitle = (fixedItems || (tag === initialTag && year === initialYear)) && title ? title : ROOT_LABEL[root];
+  const sectionTitle = tag === initialTag && year === initialYear && title ? title : ROOT_LABEL[root];
 
   return (
     <div className="browse-screen" style={hidden ? { display: 'none' } : undefined}>
       <div className="browse-head">
         <div className="browse-title">{sectionTitle}</div>
-        {!fixedItems && (
-          <div className="browse-filters">
-            {filterButton(0, 'tag', tag)}
-            {filterButton(1, 'year', year)}
-          </div>
-        )}
+        <div className="browse-filters">
+          {filterButton(0, 'tag', tag)}
+          {filterButton(1, 'year', year)}
+        </div>
         <div className="browse-count">
           {total ? `${total.toLocaleString('es')} títulos` : loading ? 'Cargando…' : ''}
         </div>
