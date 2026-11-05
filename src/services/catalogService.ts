@@ -82,7 +82,53 @@ function formatEpisodeDuration(raw: any): string {
   return `${n > 600 ? Math.round(n / 60) : n} min`; // large values are seconds
 }
 
+// ---------- Live catalog
+// The home rows come from the portal (getNextColumns of each root). Each session shows the copy
+// saved by the previous one and refreshes it in the background, so starting never waits for the
+// network; the catalog is at most one session old. The bundled portal.js is the fallback.
+const LIVE_KEY = 'xuper_live_catalog_v1';
+const LIVE_ROOTS = ['featured', 'movies', 'series', 'kids', 'anime', 'free'];
+const LIVE_FIRST_WAIT_MS = 5000;
+const LIVE_REFRESH_AFTER_MS = 30 * 60 * 1000;
+
+function readLiveCatalog(): { at: number; items: any[] } | null {
+  try {
+    const raw = localStorage.getItem(LIVE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (parsed && Array.isArray(parsed.items) && parsed.items.length) return parsed;
+  } catch {}
+  return null;
+}
+
+function homeRoot(root: string): Promise<any[]> {
+  return new Promise((resolve, reject) => {
+    const client = window.MagisClient;
+    if (!client || typeof client.home !== 'function') return reject(new Error('no portal client'));
+    client.home(root, 1, (err: any, res: any) => (err ? reject(err) : resolve((res && res.items) || [])));
+  });
+}
+
+/** Downloads every root's rows; saves them when complete enough */
+function fetchLiveCatalog(): Promise<any[]> {
+  return LIVE_ROOTS.reduce<Promise<any[]>>(
+    (acc, root) => acc.then(all => homeRoot(root).then(items => all.concat(items), () => all)),
+    Promise.resolve([])
+  ).then(items => {
+    if (items.length < 100) throw new Error(`live catalog too small (${items.length})`);
+    try { localStorage.setItem(LIVE_KEY, JSON.stringify({ at: Date.now(), items })); } catch {}
+    console.log(`[catalog] live catalog saved: ${items.length} items`);
+    return items;
+  });
+}
+
 class CatalogService {
+  /** Refreshes the saved live catalog for the next start (no change on screen) */
+  public refreshLiveInBackground(): void {
+    const saved = readLiveCatalog();
+    if (saved && Date.now() - saved.at < LIVE_REFRESH_AFTER_MS) return;
+    fetchLiveCatalog().catch(e => console.log('[catalog] live refresh failed:', e && e.message));
+  }
+
   private cache: {
     featured: VodItem[];
     movies: VodItem[];
@@ -101,6 +147,16 @@ class CatalogService {
     rowsByGroup: Record<string, VodItem[]>;
   }> {
     if (this.cache) return this.cache;
+
+    // 0. Live catalog from the portal: the copy saved by the last session, or a fresh one
+    //    (the first start waits up to LIVE_FIRST_WAIT_MS, then falls back to the bundled copy)
+    const saved = readLiveCatalog();
+    if (saved) return this.categorize(saved.items.map((it: any, idx: number) => normalizeItem(it, idx)));
+    const fresh = await Promise.race([
+      fetchLiveCatalog().catch(() => null),
+      new Promise<null>(resolve => setTimeout(() => resolve(null), LIVE_FIRST_WAIT_MS))
+    ]);
+    if (fresh && fresh.length) return this.categorize(fresh.map((it: any, idx: number) => normalizeItem(it, idx)));
 
     // 1. Check window.XUPERTV_PORTAL (rich bundled portal catalog with 610 items)
     if (typeof window !== 'undefined' && window.XUPERTV_PORTAL && Array.isArray(window.XUPERTV_PORTAL.items) && window.XUPERTV_PORTAL.items.length > 0) {

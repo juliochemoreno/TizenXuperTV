@@ -1,7 +1,10 @@
 export type PinMode = 'unlock' | 'create' | 'change' | 'disable';
 
+export type BrowseRoot = 'featured' | 'movies' | 'series' | 'kids' | 'anime';
+
 export type Screen =
   | { id: 'home' }
+  | { id: 'browse'; root: BrowseRoot; title: string; tag?: string; year?: string }
   | { id: 'profile'; section?: number }
   | { id: 'pin'; mode: PinMode; onSuccess?: () => void; onCancel?: () => void };
 

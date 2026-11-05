@@ -6,6 +6,7 @@ import { HistoryItem } from '../types/history';
 import { HeroShowcase } from '../components/vod/HeroShowcase';
 import { ContentSlider } from '../components/vod/ContentSlider';
 import { ContinueWatchingRow } from '../components/vod/ContinueWatchingRow';
+import { rowHasSeeAll } from '../app/tabRows';
 
 export interface DestacadosFocus {
   area: 'hero' | 'row';
@@ -39,6 +40,7 @@ interface DestacadosViewProps {
   onToggleFavHero: (item: VodItem) => void;
   onActivateHistory: (item: HistoryItem) => void;
   onActivateVod: (item: VodItem) => void;
+  onSeeAll?: (row: ContentRowDef) => void;
 }
 
 export const DestacadosView: React.FC<DestacadosViewProps> = ({
@@ -55,7 +57,8 @@ export const DestacadosView: React.FC<DestacadosViewProps> = ({
   onPlayHero,
   onToggleFavHero,
   onActivateHistory,
-  onActivateVod
+  onActivateVod,
+  onSeeAll
 }) => {
   useRenderCount('DestacadosView');
   const containerRef = useRef<HTMLDivElement>(null);
@@ -167,6 +170,7 @@ export const DestacadosView: React.FC<DestacadosViewProps> = ({
             isWide={row.isWide}
             focusedIndex={focusedIndex}
             onActivate={onActivateVod}
+            onSeeAll={onSeeAll && rowHasSeeAll(row) ? () => onSeeAll(row) : undefined}
           />
         );
       })}

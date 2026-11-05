@@ -1411,6 +1411,59 @@
     });
   }
 
+  // Root column ids for the full listings (v3/getColumnContents of the portal tree)
+  var ROOT_IDS = {
+    featured: 76176,
+    movies: 76177,
+    series: 76178,
+    kids: 76783,
+    anime: 76180
+  };
+
+  // Full catalog of a root, page by page; filters: { tags, year, originalCountry } (portal values, in English)
+  function browse(root, filters, pageNum, pageSize, callback) {
+    var columnId = ROOT_IDS[root];
+    if (!columnId) return callback(new Error('unknown root ' + root));
+    var body = { columnId: columnId, pageNum: Math.max(1, pageNum || 1), pageSize: pageSize || 42 };
+    filters = filters || {};
+    if (filters.tags) body.tags = filters.tags;
+    if (filters.year) body.year = filters.year;
+    if (filters.originalCountry) body.originalCountry = filters.originalCountry;
+    ensureSession(function (err) {
+      if (err) return callback(err);
+      call('v3/filterByContent', body, function (fErr, fRes) {
+        if (fErr) return callback(fErr);
+        var list = fRes && fRes.assetList || [];
+        var items = [];
+        for (var i = 0; i < list.length; i++) {
+          var it = itemFromAsset(list[i], ROOT_CATEGORY[root] || '', null);
+          if (it) items.push(it);
+        }
+        callback(null, { items: items, total: parseInt(fRes && fRes.totalSize, 10) || 0 });
+      });
+    });
+  }
+
+  var filterCache = {};
+  // Filter values of a root: { tags: [...], year: [...], originalCountry: [...] }
+  function browseFilters(root, callback) {
+    var columnId = ROOT_IDS[root];
+    if (!columnId) return callback(new Error('unknown root ' + root));
+    if (filterCache[root]) return callback(null, filterCache[root]);
+    ensureSession(function (err) {
+      if (err) return callback(err);
+      call('v3/filterGenre', { columnId: columnId }, function (gErr, gRes) {
+        if (gErr) return callback(gErr);
+        filterCache[root] = {
+          tags: gRes && gRes.tags || [],
+          year: gRes && gRes.year || [],
+          originalCountry: gRes && gRes.originalCountry || []
+        };
+        callback(null, filterCache[root]);
+      });
+    });
+  }
+
   var searchCache = {};
   function search(value, callback) {
     var val = trim(value);
@@ -1455,6 +1508,8 @@
     mediaInfo: mediaInfo,
     detail: detail,
     home: home,
+    browse: browse,
+    browseFilters: browseFilters,
     search: search,
     getLiveCategories: getLiveCategories,
     getLiveChannels: getLiveChannels,

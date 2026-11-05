@@ -13,6 +13,8 @@ interface ContentSliderProps {
   /** The row is on screen or next to it: its first cards load their images */
   nearFocus: boolean;
   onActivate: (item: VodItem) => void;
+  /** Adds a last "Ver todo" card (focus index = items.length) */
+  onSeeAll?: () => void;
 }
 
 const ContentSliderComponent: React.FC<ContentSliderProps> = ({
@@ -23,7 +25,8 @@ const ContentSliderComponent: React.FC<ContentSliderProps> = ({
   isWide,
   focusedIndex,
   nearFocus,
-  onActivate
+  onActivate,
+  onSeeAll
 }) => {
   const sliderRef = useRef<HTMLDivElement>(null);
   // Images load only for the cards on screen plus a few ahead, and stay once loaded:
@@ -66,6 +69,15 @@ const ContentSliderComponent: React.FC<ContentSliderProps> = ({
             onActivate={onActivate}
           />
         ))}
+        {onSeeAll && (
+          <div
+            className={`see-all-card ${isWide ? 'is-wide-card' : ''} ${focusedIndex === items.length ? 'is-focused' : ''}`}
+            onClick={onSeeAll}
+          >
+            <span className="see-all-icon">›</span>
+            <span className="see-all-label">Ver todo</span>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -81,6 +93,7 @@ export const ContentSlider = React.memo<ContentSliderProps>(
     if (prev.isRanked !== next.isRanked) return false;
     if (prev.isWide !== next.isWide) return false;
     if (prev.nearFocus !== next.nearFocus) return false;
+    if (!!prev.onSeeAll !== !!next.onSeeAll) return false;
     return true;
   }
 );

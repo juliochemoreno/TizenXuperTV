@@ -4,6 +4,7 @@ import { DestacadosFocus, ContentRowDef } from '../../views/DestacadosView';
 import { VodItem } from '../../types/vod';
 import { HistoryItem } from '../../types/history';
 import { Setter } from '../types';
+import { rowHasSeeAll } from '../tabRows';
 
 export interface VodTabsKeysCtx {
   activeHeroIndex: number;
@@ -17,6 +18,7 @@ export interface VodTabsKeysCtx {
   getRowItemCount: (rowIdx: number) => number;
   returnToHeader: () => void;
   findVod: (item: HistoryItem) => VodItem;
+  openSeeAll: (row: ContentRowDef) => void;
 }
 
 export function handleVodTabsKeys(key: TvKey, ctx: VodTabsKeysCtx): boolean {
@@ -31,7 +33,8 @@ export function handleVodTabsKeys(key: TvKey, ctx: VodTabsKeysCtx): boolean {
     totalRows,
     getRowItemCount,
     returnToHeader,
-    findVod
+    findVod,
+    openSeeAll
   } = ctx;
   if (destacadosFocus.area === 'hero') {
     const heroCount = currentHeroItems.length || 1;
@@ -133,7 +136,9 @@ export function handleVodTabsKeys(key: TvKey, ctx: VodTabsKeysCtx): boolean {
       const rowDef = currentRows[curRow];
       if (rowDef) {
         const item = rowDef.items[curCol];
-        if (item) {
+        if (!item && curCol === rowDef.items.length && rowHasSeeAll(rowDef)) {
+          openSeeAll(rowDef);
+        } else if (item) {
           if (rowDef.type === 'history') {
             const hist = item as HistoryItem;
             const vod = findVod(hist);

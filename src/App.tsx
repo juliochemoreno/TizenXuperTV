@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { TabId, TABS } from './components/layout/TopNavbar';
 import { Header } from './components/layout/Header';
-import { DestacadosView, DestacadosFocus } from './views/DestacadosView';
+import { DestacadosView, DestacadosFocus, ContentRowDef } from './views/DestacadosView';
 import { LiveTvView } from './views/LiveTvView';
 import { VodDetailView } from './views/VodDetailView';
 import { VodPlayerFullscreen } from './views/VodPlayerFullscreen';
 import { SearchModal } from './components/search/SearchModal';
 import { ProfileScreen } from './screens/ProfileScreen';
+import { BrowseScreen } from './screens/BrowseScreen';
 import { PinDialog } from './screens/PinDialog';
 import { playerService } from './services/playerService';
 import { favoritesService } from './services/favoritesService';
@@ -15,6 +16,7 @@ import { useScreenStack } from './hooks/useScreenStack';
 import { useStableHandlers } from './hooks/useStableHandlers';
 import { startSplash, completeSplashTask, preloadImages } from './lib/splash';
 import { optimizedImage } from './lib/imageCache';
+import { catalogService } from './services/catalogService';
 import { VodItem, VodEpisode } from './types/vod';
 import { LiveChannel, LiveCategory } from './types/channel';
 import { historyService } from './services/historyService';
@@ -25,7 +27,7 @@ import { useCatalog } from './app/useCatalog';
 import { useLiveTv } from './app/useLiveTv';
 import { useVodDetail } from './app/useVodDetail';
 import { useParentalGuards } from './app/useParentalGuards';
-import { heroItemsForTab, buildTabRows } from './app/tabRows';
+import { heroItemsForTab, buildTabRows, rowHasSeeAll, browseTargetForRow } from './app/tabRows';
 import { handleFullscreenLiveKeys } from './app/keys/fullscreenLiveKeys';
 import { handleVodDetailKeys } from './app/keys/vodDetailKeys';
 import { handleHeaderKeys } from './app/keys/headerKeys';
@@ -187,6 +189,11 @@ export const App: React.FC = () => {
 
   // Splash (index.html): a real loading screen, see lib/splash.ts
   useEffect(() => { startSplash(); }, []);
+  // Keep the live VOD catalog fresh for the next start, once the first screen is idle
+  useEffect(() => {
+    const t = setTimeout(() => catalogService.refreshLiveInBackground(), 20000);
+    return () => clearTimeout(t);
+  }, []);
   const splashImagesRef = useRef(false);
   useEffect(() => {
     if (splashImagesRef.current || !(featuredItems.length || movieItems.length || seriesItems.length)) return;
@@ -214,8 +221,15 @@ export const App: React.FC = () => {
     copies.then(srcs => preloadImages(urls.concat(srcs))).then(() => completeSplashTask('images'));
   }, [currentRows, currentHeroItems, featuredItems, movieItems, seriesItems]);
   const getRowItemCount = useCallback((rowIdx: number): number => {
-    return currentRows[rowIdx] ? currentRows[rowIdx].items.length : 0;
+    const row = currentRows[rowIdx];
+    if (!row) return 0;
+    return row.items.length + (rowHasSeeAll(row) ? 1 : 0);
   }, [currentRows]);
+  // "Ver todo" of a row: the section's full catalog, filtered by the row's genre or year
+  const openSeeAll = useCallback((row: ContentRowDef) => {
+    const target = browseTargetForRow(row, selectedTab);
+    push({ id: 'browse', root: target.root, title: '', tag: target.tag, year: target.year });
+  }, [selectedTab, push]);
 
   // Each VOD tab remembers its focus, hero slide and scroll; a new tab starts at the top
   const tabMemoryRef = useRef<Partial<Record<TabId, { focus: DestacadosFocus; hero: number; scrollTop: number }>>>({});
@@ -314,7 +328,8 @@ export const App: React.FC = () => {
       totalRows,
       getRowItemCount,
       returnToHeader,
-      findVod
+      findVod,
+      openSeeAll
     });
   };
   const handleKey = useCallback((key: TvKey, ev?: KeyboardEvent) => handleKeyRef.current(key, ev), []);
@@ -441,6 +456,7 @@ export const App: React.FC = () => {
             handleOpenDetail(vod);
           }}
           onActivateVod={it => handleOpenDetail(it)}
+          onSeeAll={openSeeAll}
         />
         </div>
       )}
@@ -510,6 +526,22 @@ export const App: React.FC = () => {
                 pop();
                 handleOpenDetail(vod);
               }}
+            />
+          );
+        }
+        if (screen.id === 'browse') {
+          // Stays under a detail opened from it, so Back returns to the same grid position
+          return (
+            <BrowseScreen
+              key={`browse-${idx}`}
+              isTop={isTop}
+              hidden={!!activeDetailItem || !!activeVodPlayer}
+              root={screen.root}
+              title={screen.title}
+              initialTag={screen.tag}
+              initialYear={screen.year}
+              onClose={pop}
+              onOpenVod={it => handleOpenDetail(it)}
             />
           );
         }

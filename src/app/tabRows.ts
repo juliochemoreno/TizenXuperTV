@@ -2,6 +2,7 @@ import { TabId } from '../components/layout/TopNavbar';
 import { ContentRowDef } from '../views/DestacadosView';
 import { VodItem } from '../types/vod';
 import { HistoryItem } from '../types/history';
+import { BrowseRoot } from '../lib/screenStack';
 
 export interface TabRowsData {
   historyItems: HistoryItem[];
@@ -376,4 +377,44 @@ export function buildTabRows(selectedTab: TabId, data: TabRowsData): ContentRowD
   }
 
   return list;
+}
+
+/** VOD rows (not history, not the ranked Top 10) end with a "Ver todo" card */
+export function rowHasSeeAll(row: ContentRowDef | undefined): boolean {
+  return !!row && row.type === 'vod' && !row.isRanked && row.items.length > 0;
+}
+
+// Row title words -> portal genre tag, so "Ver todo" opens already filtered
+const TITLE_TAGS: [RegExp, string][] = [
+  [/terror|miedo|halloween/i, 'Horror'],
+  [/acci[oó]n/i, 'Action'],
+  [/comedia|risa/i, 'Comedy'],
+  [/romance|amor/i, 'Romance'],
+  [/animaci[oó]n|animad/i, 'Animation'],
+  [/ciencia ficci[oó]n|sci-?fi/i, 'Sci-Fi'],
+  [/documental/i, 'Documentary'],
+  [/crimen|polic/i, 'Crime'],
+  [/drama/i, 'Drama'],
+  [/aventura/i, 'Adventure'],
+  [/familia/i, 'Family'],
+  [/fantas[ií]a/i, 'Fantasy'],
+  [/suspenso|thriller/i, 'Thriller']
+];
+
+/** Where "Ver todo" of a row goes: the tab's section, filtered by the genre or year in the row title */
+export function browseTargetForRow(row: ContentRowDef, selectedTab: TabId): { root: BrowseRoot; tag?: string; year?: string } {
+  let root: BrowseRoot;
+  if (selectedTab === 'kids') root = 'kids';
+  else if (selectedTab === 'anime') root = 'anime';
+  else if (selectedTab === 'series') root = 'series';
+  else if (selectedTab === 'peliculas') root = 'movies';
+  else {
+    const items = row.items as VodItem[];
+    const series = items.filter(it => it.isSeries).length;
+    root = series > items.length / 2 ? 'series' : 'movies';
+  }
+  const text = `${row.title} ${row.subtitle || ''}`;
+  const tagHit = TITLE_TAGS.find(([re]) => re.test(text));
+  const yearHit = /\b(19|20)\d{2}\b/.exec(text);
+  return { root, tag: tagHit ? tagHit[1] : undefined, year: yearHit ? yearHit[0] : undefined };
 }

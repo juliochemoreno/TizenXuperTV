@@ -4275,3 +4275,133 @@ html.xuper-vod-avplay .app-root,
 .vp-menu.is-settings .vp-menu-title {
   padding-top: 10px;
 }
+
+/* "Ver todo" card at the end of a row */
+.see-all-card {
+  flex: 0 0 176px;
+  width: 176px;
+  height: 262px;
+  border-radius: 12px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 3px solid transparent;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.see-all-card.is-wide-card {
+  flex: 0 0 240px;
+  width: 240px;
+  height: clamp(230px, 17vw, 295px);
+}
+
+.see-all-card.is-focused {
+  border-color: #ffffff;
+  background: rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+}
+
+.see-all-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 44px;
+  line-height: 1;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.see-all-label {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+/* "Ver todo" screen: full section catalog with genre and year filters */
+.browse-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  background: var(--bg-main);
+  color: var(--text-main);
+  overflow: hidden;
+}
+
+.browse-head {
+  display: flex;
+  align-items: baseline;
+  gap: 20px;
+  padding: 40px 60px 14px;
+}
+
+.browse-title {
+  font-size: 38px;
+  font-weight: 800;
+}
+
+.browse-count {
+  font-size: 20px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.browse-chips {
+  overflow: hidden;
+  padding: 6px 60px;
+}
+
+.browse-chips-track {
+  display: flex;
+  gap: 12px;
+  transition: transform 0.2s ease-out;
+}
+
+.browse-chip {
+  flex: 0 0 auto;
+  padding: 9px 20px;
+  border-radius: 22px;
+  font-size: 18px;
+  font-weight: 600;
+  white-space: nowrap;
+  background: rgba(255, 255, 255, 0.08);
+  border: 2px solid transparent;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.browse-chip.is-selected {
+  background: rgba(255, 255, 255, 0.9);
+  color: #000000;
+}
+
+.browse-chip.is-focused {
+  border-color: #ffffff;
+  transform: scale(1.06);
+}
+
+.browse-body {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 230px;
+  bottom: 0;
+  overflow: hidden;
+  padding: 10px 60px 0;
+}
+
+.browse-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px 22px;
+  transition: transform 0.25s ease-out;
+}
+
+.browse-empty {
+  margin-top: 80px;
+  text-align: center;
+  font-size: 22px;
+  color: rgba(255, 255, 255, 0.6);
+}
