@@ -1585,10 +1585,12 @@
   }
 
   var searchCache = {};
-  function search(value, callback) {
+  // opts.pageSize: results wanted (default 20)
+  function search(value, callback, opts) {
     var val = trim(value);
     if (!val) return callback(null, { items: [] });
-    var key = val.toLowerCase();
+    var size = (opts && opts.pageSize) || 20;
+    var key = val.toLowerCase() + '|' + size;
     if (searchCache[key] && Date.now() - searchCache[key].at < SEARCH_TTL) {
       return callback(null, { items: searchCache[key].items, cached: true });
     }
@@ -1600,7 +1602,7 @@
         columnId: '',
         filter: '',
         pageNum: 1,
-        pageSize: 20
+        pageSize: size
       }, function (sErr, sRes) {
         if (sErr) return callback(sErr);
         var list = sRes && sRes.searchItemList || [];

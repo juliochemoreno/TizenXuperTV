@@ -102,19 +102,62 @@ export const SearchModal: React.FC<SearchModalProps> = ({
     });
   }, [isTvSearch, query, allKnownChannels]);
 
-  // Filtered VOD items
+  // Normalised text of every home title, built once (not on every key press)
+  const localHaystacks = useMemo(() => allVodItems.map(item => ({
+    item,
+    title: normalizeText(item.title),
+    rest: normalizeText(`${Array.isArray(item.genres) ? item.genres.join(' ') : ''} ${item.actors || ''}`)
+  })), [allVodItems]);
+
+  // Search the whole portal catalog (all movies and series), not only the titles on the home rows
+  const [remoteVod, setRemoteVod] = useState<VodItem[]>([]);
+  const [remoteState, setRemoteState] = useState<'idle' | 'loading' | 'done' | 'failed'>('idle');
+  const [remoteTotal, setRemoteTotal] = useState(0);
+  useEffect(() => {
+    if (isTvSearch || !isOpen) return;
+    const q = query.trim();
+    if (q.length < 2) {
+      setRemoteVod([]);
+      setRemoteState('idle');
+      setRemoteTotal(0);
+      return;
+    }
+    let alive = true;
+    setRemoteState('loading');
+    // Wait for a pause in typing: every character is a portal request
+    const timer = setTimeout(() => {
+      const client = window.MagisClient;
+      if (!client || typeof client.search !== 'function') {
+        if (alive) setRemoteState('failed');
+        return;
+      }
+      client.search(q, (err: any, res: any) => {
+        if (!alive) return;
+        if (err || !res) {
+          setRemoteState('failed');
+          return;
+        }
+        setRemoteVod((res.items || []).map((it: any) => ({ ...it, isSeries: it.type === 'teleplay' || it.kind === 'serie' })));
+        setRemoteTotal(res.total || (res.items || []).length);
+        setRemoteState('done');
+      }, { pageSize: 60 });
+    }, 450);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [query, isTvSearch, isOpen]);
+
+  // Results: home titles that match show at once, the portal's results follow without repeats
   const filteredVod = useMemo(() => {
     if (isTvSearch) return [];
     const q = normalizeText(query.trim());
     if (!q) return allVodItems.slice(0, 24);
-    return allVodItems.filter(item => {
-      const title = normalizeText(item.title);
-      const genres = Array.isArray(item.genres) ? normalizeText(item.genres.join(' ')) : '';
-      const actors = normalizeText(item.actors);
-      const synopsis = normalizeText(item.synopsis);
-      return title.includes(q) || genres.includes(q) || actors.includes(q) || synopsis.includes(q);
-    });
-  }, [isTvSearch, query, allVodItems]);
+    const local = localHaystacks.filter(h => h.title.includes(q) || h.rest.includes(q)).map(h => h.item);
+    const seen = new Set(local.map(it => it.id));
+    const remote = remoteVod.filter(it => !seen.has(it.id));
+    return local.concat(remote).slice(0, 120);
+  }, [isTvSearch, query, allVodItems, localHaystacks, remoteVod]);
 
   const totalResults = isTvSearch ? filteredChannels.length : filteredVod.length;
 
@@ -259,7 +302,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
               <p className="search-modal-subtitle">
                 {isTvSearch
                   ? 'Filtra entre todos los canales disponibles por nombre o programación'
-                  : 'Explora nuestro catálogo de más de 600 títulos por nombre, género o reparto'}
+                  : 'Busca en todo el catálogo de películas y series por título, género o reparto'}
               </p>
             </div>
           </div>
@@ -296,14 +339,21 @@ export const SearchModal: React.FC<SearchModalProps> = ({
         {/* Results Area */}
         <div className="search-results-area">
           <div className="search-results-counter">
-            <span>Resultados: {totalResults} {isTvSearch ? 'canales' : 'títulos'}</span>
+            <span>
+              Resultados: {totalResults} {isTvSearch ? 'canales' : 'títulos'}
+              {!isTvSearch && remoteState === 'loading' && ' · buscando en todo el catálogo…'}
+              {!isTvSearch && remoteState === 'done' && remoteTotal > totalResults && ` · ${remoteTotal.toLocaleString('es')} en el catálogo`}
+              {!isTvSearch && remoteState === 'failed' && ' · sin conexión con el catálogo completo'}
+            </span>
             <span className="search-nav-hint">▲ ▼ ◄ ► y OK · ► desde el teclado abre los resultados</span>
           </div>
 
           {totalResults === 0 ? (
             <div className="search-empty-state">
               <div className="search-empty-icon">🔍</div>
-              <div className="search-empty-title">No se encontraron resultados para "{query}"</div>
+              <div className="search-empty-title">
+                {!isTvSearch && remoteState === 'loading' ? `Buscando "${query}" en todo el catálogo…` : `No se encontraron resultados para "${query}"`}
+              </div>
               <div className="search-empty-desc">
                 {isTvSearch
                   ? 'Intenta buscar con otra palabra clave o revisa la lista de categorías.'
