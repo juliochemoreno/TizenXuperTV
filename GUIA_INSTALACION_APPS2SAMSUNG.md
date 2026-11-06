@@ -8,7 +8,7 @@ Esta guía detalla paso a paso cómo instalar **TizenXuper TV** en cualquier Sma
 
 1. **Smart TV Samsung** encendido y conectado a tu red Wi-Fi o por cable de red.
 2. **Computadora (Windows o Mac)** conectada a la **misma red Wi-Fi/local** que el televisor.
-3. El archivo del paquete de la app: **`TizenXuperTV_1.9.1_signed.wgt`** (o la versión más reciente).
+3. El archivo del paquete de la app: **`TizenXuperTV_1.9.2_signed.wgt`** (o la versión más reciente).
 4. La aplicación **Apps2Samsung** instalada en tu computadora ([Descargar desde el repositorio oficial de Apps2Samsung / GitHub](https://github.com/jeppevinkel/apps2samsung)).
 
 ---
@@ -53,7 +53,7 @@ Para que Apps2Samsung sepa a qué televisor conectarse:
 4. En el menú de Apps2Samsung, busca la opción:
    - **"Install Custom WGT / TPK"** o **"Browse WGT"**.
 5. Selecciona el archivo de la aplicación:
-   `TizenXuperTV_1.9.1_signed.wgt`
+   `TizenXuperTV_1.9.2_signed.wgt`
 6. Haz clic en **Install** (o **Sign & Install**).
 7. Apps2Samsung realizará automáticamente:
    - Detección del ID único (DUID) de tu televisor.
@@ -88,7 +88,12 @@ En unos 10 a 20 segundos verás el mensaje de confirmación **"Installation Succ
 - Esto ocurre si la app se intentó instalar sin firmar con el DUID del televisor.
 - Al usar **Apps2Samsung**, asegúrate de que la app tenga permiso para generar el certificado de distribuidor para tu TV, o utiliza la opción **"Sign & Install"** dentro de la herramienta.
 
-### 3. La app no aparece en la barra de inicio
+### 3. No se ve ningún canal ni película (bloqueo del proveedor de internet)
+- Algunos proveedores (por ejemplo en Chile) bloquean los servidores de video. La app lo indica con el mensaje **"Tu proveedor de internet bloquea este canal"**; la TV abierta sí funciona.
+- Cambia el DNS de la TV: **Configuración > General > Red > Estado de la red > Configuración de IP > Configuración de DNS > Introducir manualmente** y escribe `1.1.1.1` (o `8.8.8.8`). Luego cierra y abre la app.
+- Si sigue igual, prueba con otra red (por ejemplo, internet compartido desde el teléfono). Si así funciona, el bloqueo es del proveedor y solo una VPN en el router lo evita.
+
+### 4. La app no aparece en la barra de inicio
 - Entra a **Smart Hub > Apps > Mis aplicaciones** (icono de engranaje arriba a la derecha).
 - Busca **TizenXuper TV**, pulsa el botón de opciones en el control y selecciona **"Agregar a Inicio"** para que quede fija en tu barra principal.
 
