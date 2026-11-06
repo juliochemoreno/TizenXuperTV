@@ -8,7 +8,7 @@ Esta guía detalla paso a paso cómo instalar **TizenXuper TV** en cualquier Sma
 
 1. **Smart TV Samsung** encendido y conectado a tu red Wi-Fi o por cable de red.
 2. **Computadora (Windows o Mac)** conectada a la **misma red Wi-Fi/local** que el televisor.
-3. El archivo del paquete de la app: **`TizenXuperTV_1.8.1_signed.wgt`** (o la versión más reciente).
+3. El archivo del paquete de la app: **`TizenXuperTV_1.9.0_signed.wgt`** (o la versión más reciente).
 4. La aplicación **Apps2Samsung** instalada en tu computadora ([Descargar desde el repositorio oficial de Apps2Samsung / GitHub](https://github.com/jeppevinkel/apps2samsung)).
 
 ---
@@ -53,7 +53,7 @@ Para que Apps2Samsung sepa a qué televisor conectarse:
 4. En el menú de Apps2Samsung, busca la opción:
    - **"Install Custom WGT / TPK"** o **"Browse WGT"**.
 5. Selecciona el archivo de la aplicación:
-   `TizenXuperTV_1.8.1_signed.wgt`
+   `TizenXuperTV_1.9.0_signed.wgt`
 6. Haz clic en **Install** (o **Sign & Install**).
 7. Apps2Samsung realizará automáticamente:
    - Detección del ID único (DUID) de tu televisor.
@@ -70,7 +70,8 @@ En unos 10 a 20 segundos verás el mensaje de confirmación **"Installation Succ
 2. Ve a la barra de aplicaciones instaladas o entra a **Apps > Apps descargadas**.
 3. Verás el icono de **TizenXuper TV**.
 4. Ábrela:
-   - En el primer inicio verás la **Guía rápida de control remoto** (◄ ▲ ▼ ► para navegar, OK para reproducir y Atrás para volver).
+   - Primero inicia sesión con **Telegram** (solo la primera vez): escanea con tu teléfono el código QR que aparece en la TV, toca **Iniciar** en el bot si aparece y luego **Sí, iniciar sesión en la TV**. Si no puedes escanear, envíale al bot el código que se ve en pantalla.
+   - Luego verás la **Guía rápida de control remoto** (◄ ▲ ▼ ► para navegar, OK para reproducir y Atrás para volver).
    - En el segundo paso de bienvenida verás el código QR de apoyo y donaciones al proyecto comunitario.
    - Al pulsar OK, ingresarás a todo el catálogo de Canales en Vivo, Películas, Series y Anime.
 
