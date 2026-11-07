@@ -8,7 +8,7 @@ Esta guía detalla paso a paso cómo instalar **TizenXuper TV** en cualquier Sma
 
 1. **Smart TV Samsung** encendido y conectado a tu red Wi-Fi o por cable de red.
 2. **Computadora (Windows o Mac)** conectada a la **misma red Wi-Fi/local** que el televisor.
-3. El archivo del paquete de la app: **`TizenXuperTV.wgt`**, del [último release](https://github.com/juliochemoreno/TizenXuperTV/releases/latest).
+3. El archivo del paquete de la app: **`TizenXuperTV.wgt`**, del [último release](https://github.com/tizenxupertv/TizenXuperTV/releases/latest).
 4. La aplicación **Apps2Samsung** instalada en tu computadora ([Descargar desde el repositorio oficial de Apps2Samsung / GitHub](https://github.com/jeppevinkel/apps2samsung)).
 
 ---
